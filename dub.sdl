@@ -1,0 +1,6 @@
+name "cud"
+description "Seamless C to D bindings"
+authors "Adrian Matoga"
+copyright "Copyright © 2017, Adrian Matoga"
+license "BSL-1.0"
+targetType "library"
