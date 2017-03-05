@@ -1,11 +1,13 @@
 module cud.preprocessor;
 
+import cud.util : isInputRange, ElementType;
+
 struct Line
 {
 	size_t num;
 	string content;
 	string file;
-	size_t[] mergedOffsets;
+	immutable(size_t)[] mergedOffsets;
 }
 
 auto split(string source, string file_name = null)
@@ -27,7 +29,7 @@ auto split(string source, string file_name = null)
 			return current.content == null;
 		}
 
-		@property const(Line) front() const pure nothrow
+		@property Line front() const pure nothrow
 		{
 			return current;
 		}
@@ -65,5 +67,74 @@ unittest
 {
 	import std.algorithm : equal;
 	static assert("foo\nbar\rbaz\r\nquux".split.equal(
-			[ Line(1, "foo"), Line(2, "bar"), Line(3, "baz"), Line(4, "quux") ]));
+			[
+				Line(1, "foo"),
+				Line(2, "bar"),
+				Line(3, "baz"),
+				Line(4, "quux")
+			]));
+}
+
+auto merge(R)(R lines)
+	if (isInputRange!R && is(ElementType!R : const(Line)))
+{
+	static struct Merger
+	{
+		R input;
+		Line current;
+
+		this(R)(R input) pure nothrow
+		{
+			this.input = input;
+			next();
+		}
+
+		@property bool empty() const pure nothrow
+		{
+			return current.content is null;
+		}
+
+		@property Line front() const pure nothrow
+		{
+			return current;
+		}
+
+		void popFront() pure nothrow
+		{
+			next();
+		}
+
+		private void next() pure nothrow
+		{
+			string l;
+			while (!input.empty) {
+				if (!l) {
+					current = input.front;
+					l = current.content;
+				} else {
+					current.mergedOffsets ~= l.length;
+					l ~= input.front.content;
+				}
+				input.popFront();
+				while (l.length && (l[$ - 1] == ' ' || l[$ - 1] == '\t'))
+					l = l[0 .. $ - 1];
+				if (l.length < 1 || l[$ - 1] != '\\')
+					break;
+				l = l[0 .. $ - 1];
+			}
+			current.content = l;
+		}
+	}
+	return Merger(lines);
+}
+
+unittest
+{
+	import std.algorithm : equal;
+	static assert("foo  b\\ \nar\\\nbaz\nquux".split.merge.equal(
+			[
+				Line(1, "foo  barbaz", null, [6, 8]),
+				Line(4, "quux")
+			]));
+	static assert("foo\\".split.merge.equal([Line(1, "foo")]));
 }
