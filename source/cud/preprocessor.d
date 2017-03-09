@@ -4,7 +4,7 @@ import std.range : isInputRange, ElementType;
 
 struct Line
 {
-	size_t num;
+	uint num;
 	string content;
 	string file;
 	immutable(size_t)[] mergedOffsets;
@@ -37,11 +37,11 @@ auto split(string source, string file_name = null)
 		void popFront() pure nothrow
 		{
 			next();
+			current.num++;
 		}
 
 		private void next() pure nothrow
 		{
-			current.num++;
 			foreach (i, c; source) {
 				if (c == '\n') {
 					current.content = source[0 .. i];
@@ -68,10 +68,10 @@ unittest
 	import std.algorithm : equal;
 	static assert("foo\nbar\rbaz\r\nquux".split.equal(
 			[
-				Line(1, "foo"),
-				Line(2, "bar"),
-				Line(3, "baz"),
-				Line(4, "quux")
+				Line(0, "foo"),
+				Line(1, "bar"),
+				Line(2, "baz"),
+				Line(3, "quux")
 			]));
 }
 
@@ -133,8 +133,8 @@ unittest
 	import std.algorithm : equal;
 	static assert("foo  b\\ \nar\\\nbaz\nquux".split.merge.equal(
 			[
-				Line(1, "foo  barbaz", null, [6, 8]),
-				Line(4, "quux")
+				Line(0, "foo  barbaz", null, [6, 8]),
+				Line(3, "quux")
 			]));
-	static assert("foo\\".split.merge.equal([Line(1, "foo")]));
+	static assert("foo\\".split.merge.equal([Line(0, "foo")]));
 }
