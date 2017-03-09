@@ -1,6 +1,6 @@
 module cud.preprocessor;
 
-import cud.util : isInputRange, ElementType;
+import std.range : isInputRange, ElementType;
 
 struct Line
 {
