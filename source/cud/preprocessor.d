@@ -26,7 +26,7 @@ auto split(string source, string file_name = null)
 
 		@property bool empty() const pure nothrow
 		{
-			return current.content == null;
+			return !source.length && !current.content.length;
 		}
 
 		@property Line front() const pure nothrow
@@ -66,12 +66,13 @@ auto split(string source, string file_name = null)
 unittest
 {
 	import std.algorithm : equal;
-	static assert("foo\nbar\rbaz\r\nquux".split.equal(
+	static assert("foo\nbar\rbaz\r\n\nquux".split.equal(
 			[
 				Line(0, "foo"),
 				Line(1, "bar"),
 				Line(2, "baz"),
-				Line(3, "quux")
+				Line(3, ""),
+				Line(4, "quux")
 			]));
 }
 
