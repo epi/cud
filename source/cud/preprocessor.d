@@ -15,9 +15,62 @@ enum TokenKind : int
 	reserved,
 
 	eof,
-
 	space,
 	newline,
+
+	lbracket,
+	rbracket,
+	lparen,
+	rparen,
+	lcurly,
+	rcurly,
+	dot,
+	ptr,
+
+	plusplus,
+	minusminus,
+	and,
+	mul,
+	plus,
+	minus,
+	tilde,
+	not,
+
+	div,
+	mod,
+	shl,
+	shr,
+	lt,
+	gt,
+	le,
+	ge,
+	equal,
+	notequal,
+	xor,
+	or,
+	andand,
+	oror,
+
+	question,
+	colon,
+	semicolon,
+	ellipsis,
+
+	assign,
+	mulassign,
+	divassign,
+	modassign,
+	plusassign,
+	minusassign,
+	shlassign,
+	shrassign,
+	andassign,
+	xorassign,
+	orassign,
+
+	comma,
+	hash,
+	hashhash,
 }
 
 struct Location
@@ -245,30 +298,165 @@ auto tokenize(R)(R input)
 
 		private auto scan()
 		{
-			auto l = line;
-			if (l.length == 0)
-				return Tok(TokenKind.newline, 0);
-			char c = l[0];
+			with (TokenKind) {
+				auto l = line;
+				if (l.length == 0)
+					return Tok(newline, 0);
+				char c = l[0];
 
-			if (c.isSpace) {
-				size_t n = 1;
-				while (n < line.length && line[n].isSpace)
-					n++;
-				return Tok(TokenKind.space, n);
-			}
+				if (c.isSpace) {
+					size_t n = 1;
+					while (n < line.length && line[n].isSpace)
+						n++;
+					return Tok(space, n);
+				}
 
-			if (c == '/') {
-				if (l.length > 1) {
-					char d = l[1];
-					if (d == '/')
-						return Tok(TokenKind.space, line.length);
-					if (d == '*')
-						return multiLineComment();
+				switch (c) {
+					case '/':
+						if (l.length > 1) {
+							char d = l[1];
+							if (d == '/')
+								return Tok(space, line.length);
+							if (d == '*')
+								return multiLineComment();
+							if (d == '=')
+								return Tok(divassign, 2);
+						}
+						return Tok(div, 1);
+					case '[':
+						return Tok(lbracket, 1);
+					case ']':
+						return Tok(rbracket, 1);
+					case '{':
+						return Tok(lcurly, 1);
+					case '}':
+						return Tok(rcurly, 1);
+					case '(':
+						return Tok(lparen, 1);
+					case ')':
+						return Tok(rparen, 1);
+					case '.':
+						if (l.length >= 3 && l[1 .. 3] == "..")
+							return Tok(ellipsis, 3);
+						else
+							return Tok(dot, 1);
+					case '-':
+						if (l.length >= 2) {
+						auto d = l[1];
+							if (d == '-')
+								return Tok(minusminus, 2);
+							else if (d == '=')
+								return Tok(minusassign, 2);
+							else if (d == '>')
+								return Tok(ptr, 2);
+						}
+						return Tok(minus, 1);
+					case '+':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '+')
+								return Tok(plusplus, 2);
+							else if (d == '=')
+								return Tok(plusassign, 2);
+						}
+						return Tok(plus, 1);
+					case '&':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '&')
+								return Tok(andand, 2);
+							else if (d == '=')
+								return Tok(andassign, 2);
+						}
+						return Tok(and, 1);
+					case '*':
+						if (l.length >= 2 && l[1] == '=')
+							return Tok(mulassign, 2);
+						return Tok(mul, 1);
+					case '~':
+						return Tok(tilde, 1);
+					case '!':
+						if (l.length >= 2 && l[1] == '=')
+							return Tok(notequal, 2);
+						return Tok(not, 1);
+					case '%':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '=')
+								return Tok(modassign, 2);
+							else if (d == '>')
+								return Tok(rcurly, 2);
+							else if (d == ':') {
+								if (l.length >= 4 && l[2 .. 4] == "%:")
+									return Tok(hashhash, 4);
+								return Tok(hash, 2);
+							}
+						}
+						return Tok(mod, 1);
+					case '<':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '=')
+								return Tok(le, 2);
+							else if (d == '%')
+								return Tok(lcurly, 2);
+							else if (d == ':')
+								return Tok(lbracket, 2);
+							else if (d == '<') {
+								if (l.length >= 3 && l[2] == '=')
+									return Tok(shlassign, 3);
+								return Tok(shl, 2);
+							}
+						}
+						return Tok(lt, 1);
+					case '>':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '=')
+								return Tok(ge, 2);
+							else if (d == '>') {
+								if (l.length >= 3 && l[2] == '=')
+									return Tok(shrassign, 3);
+								return Tok(shr, 2);
+							}
+						}
+						return Tok(gt, 1);
+					case '=':
+						if (l.length >= 2 && l[1] == '=')
+							return Tok(equal, 2);
+						return Tok(assign, 1);
+					case '^':
+						if (l.length >= 2 && l[1] == '=')
+							return Tok(xorassign, 2);
+						return Tok(xor, 1);
+					case '|':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '|')
+								return Tok(oror, 2);
+							else if (d == '=')
+								return Tok(orassign, 2);
+						}
+						return Tok(or, 1);
+					case '?':
+						return Tok(question, 1);
+					case ':':
+						if (l.length >= 2 && l[1] == '>')
+							return Tok(rbracket, 2);
+						return Tok(colon, 1);
+					case ';':
+						return Tok(semicolon, 1);
+					case ',':
+						return Tok(comma, 1);
+					case '#':
+						if (l.length >= 2 && l[1] == '#')
+							return Tok(hashhash, 2);
+						return Tok(hash, 1);
+					default:
+						// TODO: other tokens
+						return Tok(reserved, 1);
 				}
 			}
-
-			// TODO: other tokens
-			return Tok(TokenKind.reserved, 1);
 		}
 
 		private void next()
@@ -315,4 +503,24 @@ unittest
 				Token(TokenKind.space,   Location("", 7, 0), "/* short */"),
 				Token(TokenKind.newline, Location("", 7, 11), ""),
 			]));
+}
+
+unittest
+{
+	import std.algorithm : map, equal;
+	with (TokenKind) {
+		static assert(
+			"[](){}.->++--&*+-~!/%<<>><><=>===!=^|&&||?:;...=*=/=%=+=-=<<=>>=&=^=|=,###<::><%%>%:%:%:"
+				.split.merge.tokenize.map!(a => a.kind).equal([
+					lbracket, rbracket, lparen, rparen, lcurly, rcurly, dot, ptr,
+					plusplus, minusminus, and, mul, plus, minus, tilde, not,
+					div, mod, shl, shr, lt, gt, le, ge, equal, notequal, xor, or, andand, oror,
+					question, colon, semicolon, ellipsis,
+					assign, mulassign, divassign, modassign, plusassign, minusassign,
+					shlassign, shrassign, andassign, xorassign, orassign,
+					comma, hashhash, hash,
+					lbracket, rbracket, lcurly, rcurly, hashhash, hash,
+					newline
+				]));
+	}
 }
