@@ -71,6 +71,12 @@ enum TokenKind : int
 	comma,
 	hash,
 	hashhash,
+
+	headername,
+	identifier,
+	ppnumber,
+	charconstant,
+	stringliteral,
 }
 
 struct Location
@@ -90,6 +96,21 @@ struct Token
 private bool isSpace(char x) pure nothrow @nogc
 {
 	return x == ' ' || x == '\t' || x == '\0';
+}
+
+private bool isDigit(char x) pure nothrow @nogc
+{
+	return x >= '0' && x <= '9';
+}
+
+private bool isNonDigit(char x) pure nothrow @nogc
+{
+	return (x >= 'A' && x <= 'Z') || (x >= 'a' && x <= 'z') || x == '_';
+}
+
+private bool isDigitOrNonDigit(char x) pure nothrow @nogc
+{
+	return x.isDigit || x.isNonDigit;
 }
 
 auto split(string source, string file_name = null)
@@ -229,16 +250,34 @@ partial preprocessing token or in a partial comment. Each comment is replaced by
 one space character. New-line characters are retained. Whether each nonempty
 sequence of white-space characters other than new-line is retained or replaced by
 one space character is implementation-defined.
+
+preprocessing-token:
+ + header-name
+ + identifier
+ + pp-number
+ + character-constant
+ + string-literal
+ + punctuator
+ + each non-white-space character that cannot be one of the above
 */
 auto tokenize(R)(R input)
 	if (isInputRange!R && is(ElementType!R : const(Line)))
 {
 	static struct Lexer
 	{
-		R input;
-		Token current;
-		Location location;
-		string line;
+		private {
+			enum IncludeState
+			{
+				none,
+				hash,
+				include,
+			}
+			R input;
+			Token current;
+			Location location;
+			string line;
+			IncludeState includeState;
+		}
 
 		this(R input)
 		{
@@ -267,6 +306,12 @@ auto tokenize(R)(R input)
 			size_t length;
 		}
 
+		private void error(string message)
+		{
+			//TODO: add Location.
+			throw new Exception(message);
+		}
+
 		private bool nextLine()
 		{
 			if (input.empty)
@@ -278,7 +323,7 @@ auto tokenize(R)(R input)
 			return true;
 		}
 
-		private auto multiLineComment()
+		private Tok lexMultiLineComment()
 		{
 			auto l = line;
 			size_t n = 2;
@@ -294,6 +339,43 @@ auto tokenize(R)(R input)
 					n = 0;
 				}
 			}
+		}
+
+		// Returns offset of the character immediately following the closing quote
+		private size_t lexCharOrStringLiteral(size_t start, char term)
+		{
+			auto l = line;
+			size_t n = start;
+			while (n < l.length) {
+				if (l[n] == term)
+					return n + 1;
+				if (l[n] == '\\') {
+					n += 2;
+					continue;
+				}
+				n++;
+			}
+			error(term == '"' ? "Unterminated string literal" : "Unterminated char literal");
+			assert(0);
+		}
+
+		private Tok lexPpNumber(size_t start)
+		{
+			auto l = line;
+			size_t n = start;
+			while (n < l.length) {
+				auto c = l[n];
+				if ((c == 'E' || c == 'e' || c == 'P' || c == 'p')
+					&& n + 1 < l.length
+					&& (l[n + 1] == '+' || l[n + 1] == '-')) {
+					n += 2;
+					continue;
+				}
+				if (c != '.' && !c.isDigitOrNonDigit)
+					return Tok(TokenKind.ppnumber, n);
+				n++;
+			}
+			return Tok(TokenKind.ppnumber, n);
 		}
 
 		private auto scan()
@@ -318,7 +400,7 @@ auto tokenize(R)(R input)
 							if (d == '/')
 								return Tok(space, line.length);
 							if (d == '*')
-								return multiLineComment();
+								return lexMultiLineComment();
 							if (d == '=')
 								return Tok(divassign, 2);
 						}
@@ -336,10 +418,13 @@ auto tokenize(R)(R input)
 					case ')':
 						return Tok(rparen, 1);
 					case '.':
-						if (l.length >= 3 && l[1 .. 3] == "..")
-							return Tok(ellipsis, 3);
-						else
-							return Tok(dot, 1);
+						if (l.length >= 2) {
+							if (l[1].isDigit)
+								return lexPpNumber(1);
+							else if (l.length >= 3 && l[1 .. 3] == "..")
+								return Tok(ellipsis, 3);
+						}
+						return Tok(dot, 1);
 					case '-':
 						if (l.length >= 2) {
 						auto d = l[1];
@@ -394,7 +479,14 @@ auto tokenize(R)(R input)
 						}
 						return Tok(mod, 1);
 					case '<':
-						if (l.length >= 2) {
+						if (includeState == IncludeState.include) {
+							size_t i = 1;
+							while (i < l.length && l[i] != '>')
+								i++;
+							if (i == l.length)
+								error("Unterminated header name");
+							return Tok(headername, i + 1);
+						} else if (l.length >= 2) {
 							auto d = l[1];
 							if (d == '=')
 								return Tok(le, 2);
@@ -452,6 +544,32 @@ auto tokenize(R)(R input)
 						if (l.length >= 2 && l[1] == '#')
 							return Tok(hashhash, 2);
 						return Tok(hash, 1);
+					case '"':
+						return Tok(
+							includeState == IncludeState.include ? headername : stringliteral,
+							lexCharOrStringLiteral(1, '"'));
+					case '\'':
+						return Tok(charconstant, lexCharOrStringLiteral(1, '\''));
+					case '0': .. case '9':
+						return lexPpNumber(0);
+					case 'u': case 'U': case 'L':
+						if (l.length >= 2) {
+							auto d = l[1];
+							if (d == '"' || d == '\'')
+								return Tok(d == '"' ? stringliteral : charconstant, lexCharOrStringLiteral(2, d));
+						}
+						goto case;
+					case 'A': .. case 'K':
+					case 'M': .. case 'T':
+					case 'V': .. case 'Z':
+					case 'a': .. case 't':
+					case 'v': .. case 'z':
+					case '_': {
+						size_t i = 1;
+						while (i < l.length && l[i].isDigitOrNonDigit)
+							i++;
+						return Tok(identifier, i);
+					}
 					default:
 						// TODO: other tokens
 						return Tok(reserved, 1);
@@ -471,6 +589,19 @@ auto tokenize(R)(R input)
 				}
 			}
 			auto tok = scan();
+
+			// context-dependent lexing of header-names
+			if (tok.kind == TokenKind.hash)
+				includeState = IncludeState.hash;
+			else if (includeState == IncludeState.hash
+				&& tok.kind == TokenKind.identifier
+				&& line[0 .. tok.length] == "include")
+				includeState = IncludeState.include;
+			else if (tok.kind == TokenKind.space)
+			{}
+			else
+				includeState = IncludeState.none;
+
 			current = Token(
 				tok.kind,
 				location,
@@ -521,6 +652,62 @@ unittest
 					comma, hashhash, hash,
 					lbracket, rbracket, lcurly, rcurly, hashhash, hash,
 					newline
+				]));
+	}
+}
+
+unittest
+{
+	import std.algorithm : equal;
+	static assert(
+		"#include <stdio.h>\n<foo\"foo\"\n#include \"foo\"".split.merge.tokenize.equal([
+				Token(TokenKind.hash,          Location("", 0, 0), "#"),
+				Token(TokenKind.identifier,    Location("", 0, 1), "include"),
+				Token(TokenKind.space,         Location("", 0, 8), " "),
+				Token(TokenKind.headername,    Location("", 0, 9), "<stdio.h>"),
+				Token(TokenKind.newline,       Location("", 0, 18), ""),
+				Token(TokenKind.lt,            Location("", 1, 0), "<"),
+				Token(TokenKind.identifier,    Location("", 1, 1), "foo"),
+				Token(TokenKind.stringliteral, Location("", 1, 4), `"foo"`),
+				Token(TokenKind.newline,       Location("", 1, 9), ""),
+				Token(TokenKind.hash,          Location("", 2, 0), "#"),
+				Token(TokenKind.identifier,    Location("", 2, 1), "include"),
+				Token(TokenKind.space,         Location("", 2, 8), " "),
+				Token(TokenKind.headername,    Location("", 2, 9), `"foo"`),
+				Token(TokenKind.newline,       Location("", 2, 14), ""),
+			]));
+}
+
+unittest
+{
+	import std.algorithm : map, equal;
+	enum str = "0x3<1/a.h>1e2\n#include <1/a.h>\n#define const.member@$";
+	static assert(str.split.merge.tokenize.map!(t => t.spelling).equal([
+				"0x3", "<", "1", "/", "a", ".", "h", ">", "1e2", "",
+				"#", "include", " ", "<1/a.h>", "",
+				"#", "define", " ", "const", ".", "member", "@", "$", ""
+			]));
+	with (TokenKind) {
+		static assert(str.split.merge.tokenize.map!(t => t.kind).equal([
+					ppnumber, lt, ppnumber, div, identifier, dot, identifier, gt, ppnumber, newline,
+					hash, identifier, space, headername, newline,
+					hash, identifier, space, identifier, dot, identifier, reserved, reserved, newline
+				]));
+	}
+}
+
+unittest
+{
+	import std.algorithm : map, equal;
+	enum str = `'a'"foo"L'x20'L"bar"u'x'U'x'u"foo"U"bar"`;
+	static assert(str.split.merge.tokenize.map!(t => t.spelling).equal([
+				`'a'`, `"foo"`, `L'x20'`, `L"bar"`,
+				`u'x'`, `U'x'`, `u"foo"`, `U"bar"`, ""
+			]));
+	with (TokenKind) {
+		static assert(str.split.merge.tokenize.map!(t => t.kind).equal([
+					charconstant, stringliteral, charconstant, stringliteral,
+					charconstant, charconstant, stringliteral, stringliteral, newline
 				]));
 	}
 }
