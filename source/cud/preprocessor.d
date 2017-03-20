@@ -1,15 +1,25 @@
+/**
+CTFEable C language preprocessor.
+
+Authors: $(LINK2 https://github.com/epi, Adrian Matoga)
+Copyright: © 2017 Adrian Matoga
+License: $(LINK2 http://www.boost.org/users/license.html, BSL-1.0).
+*/
+
 module cud.preprocessor;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
 
+///
 struct Line
 {
-	uint num;
-	string content;
-	string file;
+	uint num; ///
+	string content; ///
+	string file; ///
 	immutable(size_t)[] mergedOffsets;
 }
 
+///
 enum TokenKind : int
 {
 	reserved,
@@ -79,18 +89,20 @@ enum TokenKind : int
 	stringliteral,
 }
 
+///
 struct Location
 {
-	string file;
-	uint line;
-	uint column;
+	string file; ///
+	uint line; ///
+	uint column; ///
 }
 
+/// Represents a token or preprocessing token (pp-token)
 struct Token
 {
-	TokenKind kind;
-	Location location;
-	string spelling;
+	TokenKind kind; ///
+	Location location; ///
+	string spelling; ///
 }
 
 private bool isSpace(char x) pure nothrow @nogc
@@ -243,8 +255,19 @@ unittest
 	static assert("foo\\".split.merge.equal([Line(0, "foo")]));
 }
 
-/*
-3. The source file is decomposed into preprocessing tokens7) and sequences of
+/**
+Decompose an input range of source lines into an input range of preprocessing tokens.
+
+Params:
+ input = input range of `Line`s
+
+Returns:
+ Input range of preprocessing `Token`s.
+
+Standards:
+According to ISO C standard draft:
+
+$(I 3. The source file is decomposed into preprocessing tokens and sequences of
 white-space characters (including comments). A source file shall not end in a
 partial preprocessing token or in a partial comment. Each comment is replaced by
 one space character. New-line characters are retained. Whether each nonempty
@@ -252,13 +275,15 @@ sequence of white-space characters other than new-line is retained or replaced b
 one space character is implementation-defined.
 
 preprocessing-token:
- + header-name
- + identifier
- + pp-number
- + character-constant
- + string-literal
- + punctuator
- + each non-white-space character that cannot be one of the above
+$(UL
+ $(LI header-name)
+ $(LI identifier)
+ $(LI pp-number)
+ $(LI character-constant)
+ $(LI string-literal)
+ $(LI punctuator)
+ $(LI each non-white-space character that cannot be one of the above)
+))
 */
 auto tokenize(R)(R input)
 	if (isInputRange!R && is(ElementType!R : const(Line)))
@@ -738,21 +763,21 @@ Preprocess a range of pp-tokens: execute preprocessor directives,
 convert pp-tokens into tokens.
 
 Params:
- input = input range of pp-tokens
+ input = input range of pp-`Token`s.
  fs = source file system, see `cud.preprocessor.isFS`
 
 Returns:
- Input range of tokens.
+ Input range of `Token`s.
 
 Standards:
-According to ISO C standard:
+According to ISO C standard draft:
 
-4. Preprocessing directives are executed, macro invocations are expanded, and
-_Pragma unary operator expressions are executed. If a character sequence that
+$(I 4. Preprocessing directives are executed, macro invocations are expanded, and
+`_Pragma` unary operator expressions are executed. If a character sequence that
 matches the syntax of a universal character name is produced by token
-concatenation (6.10.3.3), the behavior is undefined. A #include preprocessing
+concatenation (6.10.3.3), the behavior is undefined. A `#include` preprocessing
 directive causes the named header or source file to be processed from phase 1
-through phase 4, recursively. All preprocessing directives are then deleted.
+through phase 4, recursively. All preprocessing directives are then deleted.)
 */
 auto preprocess(R, FS)(R input, auto ref FS fs)
 	if (isInputRange!R && is(ElementType!R : const(Token)) && isFS!FS)
