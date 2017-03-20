@@ -711,3 +711,61 @@ unittest
 				]));
 	}
 }
+
+/**
+Defines a simple abstraction of a read-only file system that returns
+contents of a file given its name.
+*/
+enum isFS(T) = is(typeof((T.init)[""]) : string);
+
+///
+unittest
+{
+	import cud.preprocessor : isFS;
+
+	string[string] aa;
+	struct FS {
+		auto opIndex(string name) { return ""; }
+	}
+
+	static assert(!isFS!(string[]));
+	static assert(isFS!(typeof(aa)));
+	static assert(isFS!FS);
+}
+
+/**
+Preprocess a range of pp-tokens: execute preprocessor directives,
+convert pp-tokens into tokens.
+
+Params:
+ input = input range of pp-tokens
+ fs = source file system, see `cud.preprocessor.isFS`
+
+Returns:
+ Input range of tokens.
+
+Standards:
+According to ISO C standard:
+
+4. Preprocessing directives are executed, macro invocations are expanded, and
+_Pragma unary operator expressions are executed. If a character sequence that
+matches the syntax of a universal character name is produced by token
+concatenation (6.10.3.3), the behavior is undefined. A #include preprocessing
+directive causes the named header or source file to be processed from phase 1
+through phase 4, recursively. All preprocessing directives are then deleted.
+*/
+auto preprocess(R, FS)(R input, auto ref FS fs)
+	if (isInputRange!R && is(ElementType!R : const(Token)) && isFS!FS)
+{
+	static struct Preprocessor
+	{
+		private {
+			R input;
+		}
+
+		this(R input)
+		{
+			this.input = input;
+		}
+	}
+}
