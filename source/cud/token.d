@@ -99,9 +99,22 @@ struct Location
 /// Represents a token or preprocessing token (pp-token)
 struct Token
 {
-	TokenKind kind; ///
+	TokenKind kind = TokenKind.reserved; ///
 	Location location; ///
 	string spelling; ///
+
+	/// Allow testing for null token
+	bool opCast(T)() if (is(T == bool))
+	{
+		return kind != TokenKind.reserved;
+	}
+
+	///
+	unittest
+	{
+		static assert(!Token.init);
+		static assert(!!Token(TokenKind.plus));
+	}
 }
 
 /// Remove tokens from the front of input range `tr` up to the first non-whitespace token.
