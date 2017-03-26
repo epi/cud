@@ -39,11 +39,14 @@ Preprocess a file: execute preprocessor directives,
 convert pp-tokens into tokens.
 
 Params:
- fs = source file system, see `cud.preprocessor.isFS`
+ fs = source file system
  file_name = name of the file to preprocess
 
 Returns:
- Input range of `Token`s.
+ Input range of tokens.
+
+See_Also:
+ `cud.preprocessor.isFS`, `cud.token.Token`
 
 Standards:
 According to ISO C standard draft:

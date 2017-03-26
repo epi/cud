@@ -165,10 +165,13 @@ unittest
 Decompose an input range of source lines into an input range of preprocessing tokens.
 
 Params:
- input = input range of `Line`s
+ input = input range of lines.
 
 Returns:
- Input range of preprocessing `Token`s.
+ Input range of preprocessing tokens.
+
+See_Also:
+ `cud.token.Line`, `cud.token.Token`
 
 Standards:
 According to ISO C standard draft:
