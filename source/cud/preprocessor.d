@@ -155,7 +155,8 @@ auto preprocess(FS)(FS fs, string file_name)
 		{
 			foreach (t; from) {
 				switch (t.kind) {
-				case TokenKind.space: break;
+				case TokenKind.space: case TokenKind.newline:
+					break;
 				case TokenKind.identifier:
 					if (auto pm = t.spelling in macros) {
 						substituteMacro(*pm);
@@ -170,7 +171,7 @@ auto preprocess(FS)(FS fs, string file_name)
 
 		private void includeFile(const(Token)[] tl)
 		{
-			auto name = tl.expect(TokenKind.headername, TokenKind.eof).spelling;
+			auto name = tl.expect(TokenKind.headername, TokenKind.newline).spelling;
 			assert(name.length >= 2);
 			name = name[1 .. $ - 1];
 			stackPush(lexFile(name));
@@ -210,9 +211,8 @@ auto preprocess(FS)(FS fs, string file_name)
 				while (!lexer.empty) {
 					auto token = lexer.front;
 					lexer.popFront;
-					if (token.kind != TokenKind.newline)
-						tl ~= token;
-					else
+					tl ~= token;
+					if (token.kind == TokenKind.newline)
 						break;
 				}
 				if (tl.empty)
