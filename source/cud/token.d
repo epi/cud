@@ -118,11 +118,17 @@ struct Token
 }
 
 /// Remove tokens from the front of input range `tr` up to the first non-whitespace token.
-package void popSpaces(R)(ref R tr) pure nothrow
+/// Return: the first non-whitespace token or `Token.init`, if not found.
+package Token popSpaces(R)(ref R tr) pure nothrow
 	if (isInputRange!R && is(ElementType!R : const(Token)))
 {
-	while (!tr.empty && tr.front.kind == TokenKind.space)
+	while (!tr.empty) {
+		immutable tok = tr.front;
+		if (tok.kind != TokenKind.space)
+			return tok;
 		tr.popFront;
+	}
+	return Token.init;
 }
 
 /**
