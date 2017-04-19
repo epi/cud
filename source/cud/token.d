@@ -137,20 +137,19 @@ package Token popSpaces(R)(ref R tr) pure nothrow
 	return Token.init;
 }
 
+
 /**
 Returns: the first token of matched sequence, or a null array if
 the `input` sequence does not match the expected `token_kinds`.
 */
-package Token match(bool expect = false)(ref const(Token)[] input, TokenKind[] token_kinds...)
+package Token match(bool expect = false)(ref const(Token)[] input, TokenKind[] token_kinds...) pure @safe
 {
 	const(Token)[] tr = input;
 	Token result;
 	foreach (i, kind; token_kinds) {
 		assert(kind != TokenKind.eof);
-		if (kind != TokenKind.space)
-			tr.popSpaces;
-		assert(!tr.empty);
-		Token tok = tr.front;
+		assert(kind != TokenKind.space);
+		const tok = tr.popSpaces;
 		if (tok.kind != kind) {
 			static if (expect) {
 				import std.string : format;
@@ -169,7 +168,7 @@ package Token match(bool expect = false)(ref const(Token)[] input, TokenKind[] t
 	return result;
 }
 
-package Token expect(ref const(Token)[] input, TokenKind[] token_kinds...)
+package Token expect(ref const(Token)[] input, TokenKind[] token_kinds...) pure @safe
 {
 	return match!true(input, token_kinds);
 }
@@ -183,18 +182,10 @@ unittest
 	with(TokenKind) {
 		crtest!("match() returns first token of matched sequence",
 			() {
-				auto toks = [ space, space, plus, space, identifier, newline ]
+				auto toks = [ space, space, plus, space, identifier ]
 					.map!(k => const(Token)(k)).array;
 				assert(toks.match(plus, identifier).kind == plus);
-				assert(toks.map!(t => t.kind).equal([newline]));
-			});
-
-		crtest!("match() can match whitespace",
-			() {
-				auto toks = [ space, space, plus, space, identifier, newline ]
-					.map!(k => const(Token)(k)).array;
-				assert(toks.match(space, plus, identifier).kind == space);
-				assert(toks.map!(t => t.kind).equal([newline]));
+				assert(toks.empty);
 			});
 
 		crtest!("match() does not accept partial matches: returns null token and does not advance input",
@@ -204,5 +195,6 @@ unittest
 				assert(!toks.match(plus, plus));
 				assert(toks.map!(t => t.kind).equal([space, space, plus, space, identifier, newline]));
 			});
+
 	}
 }
