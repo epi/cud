@@ -224,7 +224,7 @@ auto tokenize(R)(R input)
 			return current.kind == TokenKind.eof;
 		}
 
-		@property ref const(Token) front() const pure nothrow
+		@property Token front() const pure nothrow
 		{
 			return current;
 		}
