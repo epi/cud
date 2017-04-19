@@ -9,6 +9,8 @@ module cud.token;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
 
+version(unittest) import cud.test;
+
 ///
 struct Line
 {
@@ -104,7 +106,8 @@ struct Token
 	string spelling; ///
 
 	/// Allow testing for null token
-	bool opCast(T)() if (is(T == bool))
+	bool opCast(T)() const pure nothrow @safe
+		if (is(T == bool))
 	{
 		return kind != TokenKind.reserved;
 	}
@@ -112,8 +115,11 @@ struct Token
 	///
 	unittest
 	{
-		static assert(!Token.init);
-		static assert(!!Token(TokenKind.plus));
+		crtest!("opCast!bool is true for Token.init",
+			() {
+				assert(!Token.init);
+				assert(!!Token(TokenKind.plus));
+			});
 	}
 }
 
