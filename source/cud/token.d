@@ -121,6 +121,11 @@ struct Token
 				assert(!!Token(TokenKind.plus));
 			});
 	}
+
+	bool opEquals(Token rhs) const pure @safe nothrow
+	{
+		return this.kind == rhs.kind && this.spelling == rhs.spelling;
+	}
 }
 
 /// Remove tokens from the front of input range `tr` up to the first non-whitespace token.
