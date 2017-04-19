@@ -8,7 +8,9 @@ License: $(LINK2 http://www.boost.org/users/license.html, BSL-1.0).
 
 module cud.test;
 
-version(unittest)
+version(unittest):
+import std.range : isInputRange, empty, front, popFront;
+
 void crtest(string description, alias fun)()
 {
 	version(StaticTest) {
@@ -22,4 +24,29 @@ void crtest(string description, alias fun)()
 		stderr.writeln("Test failed: " ~ description);
 		throw t;
 	}
+}
+
+void assertEqual(R1, R2)(R1 actual, R2 expected)
+	if (isInputRange!R1 && isInputRange!R2 && is(typeof(actual.front == expected.front ? 1 : 0)))
+{
+	import std.string : format;
+	import core.exception : AssertError;
+	uint n = 0;
+	while (!actual.empty && !expected.empty) {
+		auto af = actual.front;
+		auto ef = expected.front;
+		if (af != ef) {
+			throw new AssertError(format("Ranges differ at %d: Actual=%s, Expected=%s",
+					n, af, ef));
+		}
+		n++;
+		actual.popFront;
+		expected.popFront;
+	}
+	if (actual.empty && expected.empty)
+		return;
+	if (actual.empty)
+		throw new AssertError(format("Range is shorter than expected. Expected[%d]=%s", n, expected.front));
+	if (expected.empty)
+		throw new AssertError(format("Range is longer than expected. Actual[%d]=%s", n, actual.front));
 }
