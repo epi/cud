@@ -10,8 +10,18 @@ module cud.preprocessor;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
 
-import cud.token;
+import cud.token : Token, TokenKind, match, expect, popSpaces;
 import cud.lexer;
+
+debug import std.stdio, std.algorithm : map, filter, equal;
+
+version(unittest) {
+	import std.algorithm : map, filter, equal;
+	import std.range : array;
+	import std.exception : assertThrown, assertNotThrown;
+	import std.stdio;
+	import cud.test;
+}
 
 /**
 Defines a simple abstraction of a read-only file system that returns
@@ -34,235 +44,143 @@ unittest
 	static assert(isFS!FS);
 }
 
-private struct Preprocessor(FS)
+private void error(A...)(Token tok, const(char)[] format, auto ref A args)
+{
+	import std.format : formattedWrite;
+	import std.range : appender;
+	auto app = appender!string;
+	app.formattedWrite(
+		"%s(%d,%d): Error: ",
+		tok.location.file,
+		tok.location.line + 1,
+		tok.location.column + 1);
+	app.formattedWrite(format, args);
+	throw new Exception(app.data);
+}
+
+struct Preprocessor(FS)
 	if (isFS!FS)
 {
-	alias Lexer = typeof(lexFile(""));
-
-	static struct Macro
-	{
-		string name;
-		const(Token)[] params;
-		const(Token)[] replacement;
-		bool isFunctionMacro;
-	}
-
 	private {
-		FS fs;
-		Lexer[] lexerStack;
-		const(Token)[] line;
-		Macro[string] macros;
+		FS m_fs;
+		const(Token)[] m_input;
+		Token[] m_output;
 	}
 
 	this(FS fs, string file_name)
 	{
-		this.fs = fs;
-		stackPush(lexFile(file_name));
-		nextLine();
+		m_fs = fs;
+		m_input = readFile(file_name);
+		m_output ~= Token(TokenKind.space);
 	}
 
-	@property bool empty() const pure nothrow
+	Token[] preprocess()
 	{
-		return line.length == 0 && stackEmpty;
-	}
-
-	@property Token front() const pure nothrow
-	{
-		return line[0];
-	}
-
-	void popFront()
-	{
-		if ((line = line[1 .. $]).length == 0)
-			nextLine();
-	}
-
-	private auto lexFile(string name)
-	{
-		return split(fs[name], name).merge.tokenize;
-	}
-
-	private @property bool stackEmpty() pure nothrow const
-	{
-		return lexerStack.length == 0;
-	}
-
-	private void stackPop()
-	{
-		lexerStack = lexerStack[0 .. $ - 1];
-	}
-
-	private @property Lexer* stackTop() pure nothrow
-	{
-		return &lexerStack[$ - 1];
-	}
-
-	private void stackPush(Lexer i)
-	{
-		import std.algorithm : move;
-		lexerStack ~= move(i);
-	}
-
-	private void defineMacro(const(Token)[] tl)
-	{
-		auto m = Macro(tl.expect(TokenKind.identifier).spelling);
-		if (!tl.empty && tl.front.kind == TokenKind.lparen) {
-			m.isFunctionMacro = true;
-			tl.popFront;
-			if (!tl.match(TokenKind.rparen)) {
-				for (;;) {
-					if (Token tok = tl.match(TokenKind.identifier)) {
-						m.params ~= tok;
-						if (tl.match(TokenKind.rparen))
-							break;
-						tl.expect(TokenKind.comma);
-					} else {
-						m.params ~= tl.expect(TokenKind.ellipsis, TokenKind.rparen);
-						break;
-					}
-				}
-			}
-		}
-		// 6.10.3.3 requires space after macro name, but we'll silently ignore this rule
-		substituteMacros(tl, m.replacement);
-		macros[m.name] = m;
-	}
-
-	unittest
-	{
-		import std.algorithm : map, equal;
-		import cud.test;
-		crtest!("All forms of macro definitions are accepted",
-			() {
-				auto fs = [ "foo.h" :
-					"#define FOO \n" ~
-					"#define BAR 42 + bar\n" ~
-					"#define BAQ(  )\n" ~
-					"#define BAT(x)\n" ~
-					"#define BAZ(x, y)\n" ~
-					"#define BAL(...)\n" ~
-					"#define BAU(x, y, ...) (x - y) / baz(__VA_ARGS__)\n" ~
-					"#define BAN ( x ## y )" ];
-
-				auto pp = fs.preprocess("foo.h");
-				while (!pp.empty)
-					pp.popFront;
-
-				assert(!pp.macros["FOO"].isFunctionMacro);
-				assert(pp.macros["FOO"].params.length == 0);
-				assert(pp.macros["FOO"].replacement.length == 0);
-
-				assert(!pp.macros["BAR"].isFunctionMacro);
-				assert(pp.macros["BAR"].params.length == 0);
-				assert(pp.macros["BAR"].replacement.map!(t => t.spelling).equal(["42", "+", "bar"]));
-
-				assert(pp.macros["BAQ"].isFunctionMacro);
-				assert(pp.macros["BAQ"].params.length == 0);
-				assert(pp.macros["BAQ"].replacement.length == 0);
-
-				assert(pp.macros["BAT"].isFunctionMacro);
-				assert(pp.macros["BAT"].params.map!(t => t.spelling).equal(["x"]));
-				assert(pp.macros["BAT"].replacement.length == 0);
-
-				assert(pp.macros["BAZ"].isFunctionMacro);
-				assert(pp.macros["BAZ"].params.map!(t => t.spelling).equal(["x", "y"]));
-				assert(pp.macros["BAZ"].replacement.length == 0);
-
-				assert(pp.macros["BAL"].isFunctionMacro);
-				assert(pp.macros["BAL"].params.map!(t => t.spelling).equal(["..."]));
-				assert(pp.macros["BAL"].replacement.length == 0);
-
-				assert(pp.macros["BAU"].isFunctionMacro);
-				assert(pp.macros["BAU"].params.map!(t => t.spelling).equal(["x", "y", "..."]));
-				assert(pp.macros["BAU"].replacement.map!(t => t.spelling).equal([
-							"(", "x", "-", "y", ")", "/", "baz", "(", "__VA_ARGS__", ")"
-						]));
-
-				assert(!pp.macros["BAN"].isFunctionMacro);
-				assert(pp.macros["BAN"].params.length == 0);
-				assert(pp.macros["BAN"].replacement.map!(t => t.spelling).equal(["(", "x", "##", "y", ")"]));
-				return true;
-			});
-	}
-
-	private void substituteMacros(const(Token)[] from, ref const(Token)[] to)
-	{
-		foreach (t; from) {
-			switch (t.kind) {
-			case TokenKind.space: case TokenKind.newline:
-				break;
-			case TokenKind.identifier:
-				if (auto pm = t.spelling in macros) {
-					foreach (mt; pm.replacement)
-						to ~= mt;
+		while (!m_input.empty) {
+			while (m_input.match(TokenKind.hash))
+				directive(m_input);
+			while (!m_input.empty) {
+				const tok = m_input.front;
+				m_input.popFront;
+				if (tok.kind == TokenKind.newline) {
+					put(Token(TokenKind.space, tok.location, ""));
 					break;
+				} else {
+					put(tok);
 				}
-				goto default;
-			default:
-				to ~= t;
 			}
 		}
+		return m_output;
 	}
 
-	private void includeFile(const(Token)[] tl)
+	private void put(in Token tok) pure
 	{
-		auto name = tl.expect(TokenKind.headername, TokenKind.newline).spelling;
+		if (tok.kind == TokenKind.space
+		 && m_output[$ - 1].kind == TokenKind.space)
+			return;
+		m_output ~= tok;
+	}
+
+	private void includeFile(ref const(Token)[] input) pure
+	{
+		auto name = input.expect(TokenKind.headername, TokenKind.newline).spelling;
 		assert(name.length >= 2);
 		name = name[1 .. $ - 1];
-		stackPush(lexFile(name));
+		input = readFile(name) ~ input;
 	}
 
-	private const(Token)[] executePreprocessorDirective(const(Token)[] tl)
+	private const(Token)[] readFile(string file_name) pure
 	{
-		tl.popSpaces;
-		if (tl.empty)
-			return tl;
-		auto d = tl[0].spelling;
-		tl = tl[1 .. $];
-		switch (d) {
-			case "define":
-				defineMacro(tl);
-				return [];
-			case "include":
-				includeFile(tl);
-				return [];
-			default:
-				throw new Exception("invalid preprocessor directive #" ~ d);
-		}
-		//return tl;
+		return m_fs[file_name]
+			.split(file_name)
+			.merge
+			.tokenize
+			.array;
 	}
 
-	private void nextLine()
+	private void directive(ref const(Token)[] input) pure
 	{
-		const(Token)[] tl;
-		for (;;) {
-			while (!stackEmpty && stackTop.empty)
-				stackPop();
-			if (stackEmpty)
-				return;
-			auto lexer = stackTop;
-			while (!lexer.empty && lexer.front.kind == TokenKind.space)
-				lexer.popFront;
-			while (!lexer.empty) {
-				auto token = lexer.front;
-				lexer.popFront;
-				tl ~= token;
-				if (token.kind == TokenKind.newline)
+		const tok = input.popSpaces;
+		input.popFront;
+		if (tok.kind == TokenKind.identifier) {
+			switch (tok.spelling) {
+				case "include":
+					includeFile(input);
 					break;
+				default:
+					error(tok, "invalid preprocessing directive '%s'", tok.spelling);
 			}
-			if (tl.empty)
-				continue;
-			if (tl.front.kind == TokenKind.hash) {
-				tl.popFront;
-				tl = executePreprocessorDirective(tl);
-				if (tl.empty)
-					continue;
-			}
-			substituteMacros(tl, line);
-			if (line.length)
-				return;
-			tl.length = 0;
 		}
+	}
+
+	debug private string format(const(Token)[] tokens) pure
+	{
+		enum color_space      = "\x1b[38;2;255;255;255;48;2;48;48;48m";
+		enum color_hash       = "\x1b[38;2;255;0;0;48;2;32;32;32m";
+		enum color_hashhash   = "\x1b[38;2;255;128;0;48;2;32;32;32m";
+		enum color_identifier = "\x1b[38;2;128;255;128;48;2;32;32;32m";
+		enum color_literal    = "\x1b[38;2;255;255;0;48;2;32;32;32m";
+		enum color_other      = "\x1b[38;2;192;192;192;48;2;32;32;32m";
+		enum color_reset      = "\x1b[0m";
+		import std.array : appender;
+		if (tokens.length == 0)
+			return "";
+		auto app = appender!string();
+		while (!tokens.empty) {
+			const tok = tokens.front;
+			tokens.popFront;
+			if (tok.kind == TokenKind.newline) {
+				app.put(color_space);
+				app.put("↵");
+				app.put(color_reset);
+			} else if (tok.kind == TokenKind.space) {
+				app.put(color_space);
+				app.put(" ");
+				app.put(color_reset);
+			} else {
+				switch (tok.kind) with (TokenKind) {
+					case identifier:
+						app.put(color_identifier);
+						break;
+					case hash:
+						app.put(color_hash);
+						break;
+					case hashhash:
+						app.put(color_hashhash);
+						break;
+					case charconstant:
+					case stringliteral:
+					case ppnumber:
+						app.put(color_literal);
+						break;
+					default:
+						app.put(color_other);
+				}
+				app.put(tok.spelling);
+				app.put(color_reset);
+			}
+		}
+		return app.data;
 	}
 }
 
@@ -275,7 +193,7 @@ Params:
  file_name = name of the file to preprocess
 
 Returns:
- Input range of tokens.
+ Array of tokens after preprocessing
 
 See_Also:
  `cud.preprocessor.isFS`, `cud.token.Token`
@@ -290,19 +208,63 @@ concatenation (6.10.3.3), the behavior is undefined. A `#include` preprocessing
 directive causes the named header or source file to be processed from phase 1
 through phase 4, recursively. All preprocessing directives are then deleted.)
 */
-auto preprocess(FS)(FS fs, string file_name)
+Token[] preprocess(FS)(FS fs, string file_name) pure // @safe
 	if (isFS!FS)
 {
-	return Preprocessor!FS(fs, file_name);
+	return Preprocessor!FS(fs, file_name).preprocess;
+}
+
+version(unittest) {
+	auto preprocess(string source)
+	{
+		return preprocess([ "test.h" : source ], "test.h");
+	}
+
+	Preprocessor!FS testPP(FS)(FS fs, string file_name, string expected = "")
+	{
+		auto pp = Preprocessor!FS(fs, file_name);
+		auto result = pp.preprocess()
+			.array;
+		auto expected_tokens = expected.split.merge.tokenize
+			.array;
+		if (!__ctfe) {
+			debug writeln(" EXP: ", pp.format(expected_tokens));
+			debug writeln(" ACT: ", pp.format(result));
+		}
+		assertEqual(
+			result.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline),
+			expected_tokens
+				.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline));
+		return pp;
+	}
+
+	Preprocessor!(string[string]) testPP(string source, string expected = "")
+	{
+		return testPP(
+			[ "test.h" : source ],
+			"test.h",
+			expected);
+	}
 }
 
 unittest
 {
-	import std.algorithm : map, equal;
+	crtest!("invalid preprocessor directive",
+		() {
+			assertThrown(testPP("#invalid"));
+		});
+}
 
-	enum fs = [
-		"foo.h" : " #include <bar.h>\n\n\n  \t#  \t define BAZ BAR\nFOO BAZ FOO",
-		"bar.h" : "#\t\t\tdefine BAR 42\n#define FOO\t \t\t\n"
-	];
-	static assert(fs.preprocess("foo.h").map!(t => t.spelling).equal(["42"]));
+unittest
+{
+	crtest!("nested #include works",
+		() {
+			enum fs = [
+				"foo.h": " foo1 \n#include \"bar.h\"\n foo2",
+				"bar.h": " bar1 \n#include \"baz.h\"\n bar2",
+				"baz.h": "baz1\n #include \"quux.h\"\n baz2",
+				"quux.h": "quux"
+			];
+			testPP(fs, "foo.h", "foo1 bar1 baz1 quux baz2 bar2 foo2");
+		});
 }
