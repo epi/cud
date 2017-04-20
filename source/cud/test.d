@@ -17,13 +17,16 @@ void crtest(string description, alias fun)()
 		static assert((){ fun(); return true; }(), "Test failed: " ~ description);
 	}
 
-	try {
-		fun();
-	} catch (Throwable t) {
+	scope(failure) {
 		import std.stdio;
-		stderr.writeln("Test failed: " ~ description);
-		throw t;
+		debug stderr.writeln("Test failed: " ~ description);
 	}
+	fun();
+}
+
+@safe pure unittest
+{
+	crtest!("can use crtest in @safe pure unittest blocks", (){});
 }
 
 void assertEqual(R1, R2)(R1 actual, R2 expected)
