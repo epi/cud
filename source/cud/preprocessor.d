@@ -334,6 +334,9 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				break;
 			case "pragma":
 				goto ignore;
+			case "if":
+				evaluateConstantExpression(input);
+				break;
 			default:
 				error(tok, "invalid preprocessing directive '%s'", tok.spelling);
 			}
@@ -550,6 +553,42 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		if (insert)
 			input = result ~ input;
 		return insert;
+	}
+
+	int evaluateConstantExpression(ref const(Token)[] tokens) pure
+	{
+		const(Token)[] expr_tokens;
+		while (!tokens.empty) {
+			const tok = tokens.popSpaces;
+			tokens.popFront;
+			if (tok.kind == TokenKind.newline)
+				break;
+			if (tok.kind == TokenKind.identifier) {
+				if (tok.spelling == "defined") {
+					// 6.10.1, Constraint 1
+					bool paren = !!tokens.match(TokenKind.lparen);
+					const name = tokens.expect(TokenKind.identifier).spelling;
+					if (paren)
+						tokens.expect(TokenKind.rparen);
+					expr_tokens ~= Token(
+						TokenKind.ppnumber, tok.location,
+						name in m_macros ? "1" : "0");
+					continue;
+				} else if (auto pm = tok.spelling in m_macros) {
+					// 6.10.1, 4
+					if (replaceMacro(*pm, tok, tokens))
+						continue;
+				}
+				expr_tokens ~= Token(TokenKind.ppnumber, tok.location, "0");
+			} else if (tok.kind == TokenKind.stringliteral) {
+				error(tok, "string literals are not valid tokens in preprocessor expressions");
+			} else {
+				expr_tokens ~= tok;
+			}
+		}
+
+		debug if (!__ctfe) { writefln("Expr %s", format(expr_tokens)); }
+		return 0;
 	}
 
 	debug private string format(const(Token)[] tokens) pure
@@ -1117,5 +1156,12 @@ unittest {
 			import std.exception : collectExceptionMsg;
 			import std.string : endsWith;
 			assert(collectExceptionMsg(testPP("#error 42 foo \"bar\"")).endsWith("42 foo \"bar\""));
+		});
+}
+
+unittest {
+	crtest!("#if reads tokens up to newline",
+		() {
+			testPP("#define foo\n#if dupa + defined(foo) (defined foo) && defined bar( bar)\nfoo");
 		});
 }
