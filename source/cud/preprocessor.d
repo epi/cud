@@ -10,7 +10,7 @@ module cud.preprocessor;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
 
-import cud.token : Token, TokenKind, match, expect, popSpaces;
+import cud.token : Token, TokenKind, match, expect, popSpaces, error;
 import cud.lexer;
 
 debug import std.stdio, std.algorithm : map, filter, equal;
@@ -102,20 +102,6 @@ final class ObjectLikeMacro : UserDefinedMacro
 	}
 
 	override void accept(MacroVisitor mv) const { mv.visit(this); }
-}
-
-private void error(A...)(Token tok, const(char)[] format, auto ref A args)
-{
-	import std.format : formattedWrite;
-	import std.range : appender;
-	auto app = appender!string;
-	app.formattedWrite(
-		"%s(%d,%d): Error: ",
-		tok.location.file,
-		tok.location.line + 1,
-		tok.location.column + 1);
-	app.formattedWrite(format, args);
-	throw new Exception(app.data);
 }
 
 struct Preprocessor(FS)

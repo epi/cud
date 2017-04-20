@@ -154,6 +154,21 @@ struct Token
 	}
 }
 
+///
+void error(A...)(Token tok, const(char)[] format, auto ref A args)
+{
+	import std.format : formattedWrite;
+	import std.range : appender;
+	auto app = appender!string;
+	app.formattedWrite(
+		"%s(%d,%d): Error: ",
+		tok.location.file,
+		tok.location.line + 1,
+		tok.location.column + 1);
+	app.formattedWrite(format, args);
+	throw new Exception(app.data);
+}
+
 /// Remove tokens from the front of input range `tr` up to the first non-whitespace token.
 /// Return: the first non-whitespace token or `Token.init`, if not found.
 package Token popSpaces(R)(ref R tr) pure nothrow
@@ -182,14 +197,10 @@ package Token match(bool expect = false)(ref const(Token)[] input, TokenKind[] t
 		assert(kind != TokenKind.space);
 		const tok = tr.popSpaces;
 		if (tok.kind != kind) {
-			static if (expect) {
-				import std.string : format;
-				throw new Exception(format("%s(%d,%d): found '%s' when expecting %s",
-					tok.location.file, tok.location.line + 1, tok.location.column + 1,
-					tok.spelling, kind));
-			} else {
+			static if (expect)
+				error(tok, "found '%s' when expecting %s", tok.spelling, kind);
+			else
 				return Token.init;
-			}
 		}
 		if (!result)
 			result = tr.front;
