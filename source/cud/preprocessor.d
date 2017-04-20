@@ -104,7 +104,7 @@ final class ObjectLikeMacro : UserDefinedMacro
 	override void accept(MacroVisitor mv) const { mv.visit(this); }
 }
 
-struct Preprocessor(FS)
+struct Preprocessor(FS, bool keepSpaces = false)
 	if (isFS!FS)
 {
 	private {
@@ -118,7 +118,8 @@ struct Preprocessor(FS)
 	{
 		m_fs = fs;
 		m_input = readFile(file_name);
-		m_output ~= Token(TokenKind.space);
+		static if (keepSpaces)
+			m_output ~= Token(TokenKind.space);
 	}
 
 	Token[] preprocess()
@@ -150,9 +151,14 @@ struct Preprocessor(FS)
 
 	private void put(in Token tok) pure
 	{
-		if (tok.kind == TokenKind.space
-		 && m_output[$ - 1].kind == TokenKind.space)
+		static if (!keepSpaces) {
+			if (tok.kind == TokenKind.space || tok.kind == TokenKind.newline)
+				return;
+		} else {
+			if (tok.kind == TokenKind.space
+			 && m_output[$ - 1].kind == TokenKind.space)
 			return;
+		}
 		m_output ~= tok;
 	}
 
