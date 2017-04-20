@@ -296,6 +296,19 @@ struct Preprocessor(FS)
 		input = readFile(name) ~ input;
 	}
 
+	private void errorDirective(in Token err_tok, ref const(Token)[] input) pure
+	{
+		string message;
+		while (!input.empty) {
+			const tok = input.front;
+			input.popFront;
+			if (tok.kind == TokenKind.newline)
+				break;
+			message ~= input.front.spelling;
+		}
+		error(err_tok, message);
+	}
+
 	private const(Token)[] readFile(string file_name) pure
 	{
 		return m_fs[file_name]
@@ -309,19 +322,36 @@ struct Preprocessor(FS)
 	{
 		const tok = input.popSpaces;
 		input.popFront;
+		if (tok.kind == TokenKind.newline)
+			return;
 		if (tok.kind == TokenKind.identifier) {
 			switch (tok.spelling) {
-				case "include":
-					includeFile(input);
+			case "include":
+				includeFile(input);
+				break;
+			case "define":
+				defineMacro(input);
+				break;
+			case "undef":
+				undefMacro(input);
+				break;
+			case "line":
+				goto ignore;
+			case "error":
+				errorDirective(tok, input);
+				break;
+			case "pragma":
+				goto ignore;
+			default:
+				error(tok, "invalid preprocessing directive '%s'", tok.spelling);
+			}
+		} else {
+		ignore:
+			while (!input.empty) {
+				const discard = input.front;
+				input.popFront;
+				if (discard.kind == TokenKind.newline)
 					break;
-				case "define":
-					defineMacro(input);
-					break;
-				case "undef":
-					undefMacro(input);
-					break;
-				default:
-					error(tok, "invalid preprocessing directive '%s'", tok.spelling);
 			}
 		}
 	}
@@ -1053,5 +1083,47 @@ unittest {
 				`puts( "The first, second, and third items." ); ` ~
 				`((x>y)?puts("x>y"): ` ~
 				`            printf("x is %d but y is %d", x, y));`);
+		});
+}
+
+unittest {
+	// FIXME
+	crtest!("#line is accepted, ignoring all pptokens up to newline",
+		() {
+			testPP(
+				"#line\n" ~
+				"#line bla bla bla\n" ~
+				"#line 1\n" ~
+				`#line 2147483647 "file.c"` ~ "\n" ~
+				"foo",
+				"foo");
+		});
+
+	crtest!("#pragma is accepted, ignoring all pptokens up to newline",
+		() {
+			testPP(
+				"#pragma\n" ~
+				"#pragma once\n" ~
+				"#pragma warning\n" ~
+				"#pragma STDC FENV_ACCESS DEFAULT\n" ~
+				"#pragma foo bar\n" ~
+				"#pragma STDC foo bar\n" ~
+				"foo",
+				"foo");
+		});
+
+	crtest!("null directive and non-directive are accepted and has no effect",
+		() {
+			testPP("#   \t \nfoo", "foo");
+			testPP("#  ! 5 43 \t \nfoo", "foo");
+		});
+}
+
+unittest {
+	crtest!("#error throws with a message containing the spelling of all tokens",
+		() {
+			import std.exception : collectExceptionMsg;
+			import std.string : endsWith;
+			assert(collectExceptionMsg(testPP("#error 42 foo \"bar\"")).endsWith("42 foo \"bar\""));
 		});
 }
