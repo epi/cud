@@ -645,3 +645,15 @@ unittest
 				]));
 	}
 }
+
+Token pasteTokens(Token lhs, Token rhs) pure
+{
+	if (rhs.kind == TokenKind.placemarker)
+		return lhs;
+	if (lhs.kind == TokenKind.placemarker)
+		return rhs;
+	string spelling = lhs.spelling ~ rhs.spelling;
+	auto line = Line(lhs.location.line, spelling, lhs.location.file, null);
+	import std.range : only;
+	return line.only.tokenize.front;
+}
