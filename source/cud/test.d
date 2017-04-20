@@ -11,6 +11,15 @@ module cud.test;
 version(unittest):
 import std.range : isInputRange, empty, front, popFront;
 
+T as(T, U)(U f) {
+	T result = cast(T) f;
+	assert(result !is null, () {
+			import std.string : format;
+			return format("Object of type %s cannot be cast to type %s", typeid(f), T.stringof);
+		}());
+	return result;
+}
+
 void crtest(string description, alias fun)()
 {
 	version(StaticTest) {

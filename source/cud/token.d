@@ -20,6 +20,8 @@ struct Line
 	immutable(size_t)[] mergedOffsets;
 }
 
+private enum maxMacroParams = 65536;
+
 ///
 enum TokenKind : int
 {
@@ -88,6 +90,10 @@ enum TokenKind : int
 	ppnumber,
 	charconstant,
 	stringliteral,
+
+	notreplacedidentifier,
+	placemarker,
+	macroparam,
 }
 
 ///
@@ -120,6 +126,26 @@ struct Token
 				assert(!Token.init);
 				assert(!!Token(TokenKind.plus));
 			});
+	}
+
+	Token toMacroParam(int index) const pure @safe
+	{
+		import std.exception : enforce;
+		enforce(index >= 0 && index < maxMacroParams);
+		return Token(
+			cast(TokenKind) (TokenKind.macroparam + index),
+			this.location, this.spelling);
+	}
+
+	@property bool isMacroParam() const pure nothrow @safe
+	{
+		return kind >= TokenKind.macroparam && kind < (TokenKind.macroparam + maxMacroParams);
+	}
+
+	@property int macroParamIndex() const pure nothrow @safe
+	{
+		assert(this.isMacroParam);
+		return kind - TokenKind.macroparam;
 	}
 
 	bool opEquals(Token rhs) const pure @safe nothrow
