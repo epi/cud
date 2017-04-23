@@ -10,7 +10,7 @@ module cud.preprocessor;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
 
-import cud.token : Token, TokenKind, match, expect, popSpaces, error;
+import cud.token;
 import cud.lexer;
 
 debug import std.stdio, std.algorithm : map, filter, equal;
@@ -146,6 +146,12 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				}
 			}
 		}
+		put(Token(
+			TokenKind.eof,
+			m_output.length
+				? Location(m_output[$ - 1].location.file, m_output[$ - 1].location.line + 1, 0)
+				: Location.init));
+
 		return m_output;
 	}
 
@@ -703,7 +709,7 @@ version(unittest) {
 		auto pp = Preprocessor!FS(fs, file_name);
 		auto result = pp.preprocess().array;
 		scope(failure) if (!__ctfe) { debug writeln(" ACT: ", pp.format(result)); }
-		auto expected_tokens = expected.split.merge.tokenize.array;
+		auto expected_tokens = expected.split.merge.tokenize.array ~ Token(TokenKind.eof);
 		scope(failure) if (!__ctfe) { debug writeln(" EXP: ", pp.format(expected_tokens)); }
 		assertEqual(
 			result.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline),
