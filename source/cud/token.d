@@ -8,8 +8,13 @@ License: $(LINK2 http://www.boost.org/users/license.html, BSL-1.0).
 module cud.token;
 
 import std.range : isInputRange, ElementType, empty, popFront, front;
+import std.ascii;
 
-version(unittest) import cud.test;
+version(unittest) {
+	import std.algorithm : map;
+	import std.exception : assertThrown;
+	import cud.test;
+}
 
 ///
 struct Line
@@ -82,6 +87,57 @@ enum TokenKind : int
 	orassign,
 
 	comma,
+
+	intconstant,
+	uintconstant,
+	longconstant,
+	ulongconstant,
+
+	auto_,
+	break_,
+	case_,
+	char_,
+	const_,
+	continue_,
+	default_,
+	do_,
+	double_,
+	else_,
+	enum_,
+	extern_,
+	float_,
+	for_,
+	goto_,
+	if_,
+	inline_,
+	int_,
+	long_,
+	register_,
+	restrict_,
+	return_,
+	short_,
+	signed_,
+	sizeof_,
+	static_,
+	struct_,
+	switch_,
+	typedef_,
+	union_,
+	unsigned_,
+	void_,
+	volatile_,
+	while_,
+	_Alignas_,
+	_Alignof_,
+	_Atomic_,
+	_Bool_,
+	_Complex_,
+	_Generic_,
+	_Imaginary_,
+	_Noreturn_,
+	_Static_assert_,
+	_Thread_local_,
+
 	hash,
 	hashhash,
 
@@ -110,6 +166,29 @@ struct Token
 	TokenKind kind = TokenKind.reserved; ///
 	Location location; ///
 	string spelling; ///
+	union {
+		long signedInt64Value;
+		ulong unsignedInt64Value;
+	}
+
+	static Token makeConstant(T)(T value, Location loc, string spelling)
+	{
+		with(TokenKind) {
+			import std.meta : AliasSeq, staticIndexOf;
+			import std.traits : isSigned, isUnsigned;
+			alias Types = AliasSeq!(int, uint, long, ulong);
+			enum kinds = [intconstant, uintconstant, longconstant, ulongconstant];
+			enum kind = kinds[staticIndexOf!(T, Types)];
+			auto result = Token(kind, loc, spelling);
+			static if (isSigned!T)
+				result.signedInt64Value = value;
+			else static if (isUnsigned!T)
+				result.unsignedInt64Value = value;
+			else
+				static assert(0);
+			return result;
+		}
+	}
 
 	/// Allow testing for null token
 	bool opCast(T)() const pure nothrow @safe
@@ -238,5 +317,163 @@ unittest
 				assert(toks.map!(t => t.kind).equal([space, space, plus, space, identifier, newline]));
 			});
 
+	}
+}
+
+Token parseNumber(Token tok) pure @safe
+{
+	auto spelling = tok.spelling;
+	ulong value = spelling.front - '0';
+	spelling.popFront;
+	if (spelling.empty)
+		return Token.makeConstant!int(0, tok.location, tok.spelling);
+	const base = () {
+		if (!value) {
+			if (spelling.length >= 2
+				&& (spelling[0] == 'x' || spelling[0] == 'X')
+				&& spelling[1].isHexDigit)
+			{
+				spelling = spelling[1 .. $];
+				return 16;
+			}
+			return 8;
+		}
+		return 10;
+	}();
+	while (!spelling.empty && spelling.front.isHexDigit) {
+		uint digit = () {
+			const c = spelling.front;
+			if (c >= '0' && c <= '9')
+				return c - '0';
+			if (c >= 'A' && c <= 'F')
+				return c - 'A' + 10;
+			if (c >= 'a' && c <= 'f')
+				return c - 'a' + 10;
+			return uint.max;
+		}();
+		if (digit >= base)
+			break;
+		const oldvalue = value;
+		value = value * base + digit;
+		if (oldvalue && value <= oldvalue)
+			error(tok,
+				"integer literal is too large to be represented in any integer type");
+		spelling.popFront;
+	}
+
+	switch (spelling) {
+		case "l": case "L":
+		case "ll": case "LL":
+			if (value <= long.max)
+				return Token.makeConstant!long(value, tok.location, tok.spelling);
+			// TODO: warn if base == 10
+			goto case;
+		case "ul": case "uL": case "Ul": case "UL":
+		case "lu": case "Lu": case "lU": case "LU":
+		case "ull": case "uLL": case "Ull": case "ULL":
+		case "llu": case "LLu": case "llU": case "LLU":
+			return Token.makeConstant!ulong(value, tok.location, tok.spelling);
+		case "":
+			if (value <= int.max)
+				return Token.makeConstant!int(cast(int) value, tok.location, tok.spelling);
+			if ((base == 8 || base == 16) && value <= uint.max)
+				return Token.makeConstant!uint(cast(uint) value, tok.location, tok.spelling);
+			if (value <= long.max)
+				return Token.makeConstant!long(value, tok.location, tok.spelling);
+			// TODO: warn if base == 10
+			return Token.makeConstant!ulong(value, tok.location, tok.spelling);
+		case "u": case "U":
+			if (value <= uint.max)
+				return Token.makeConstant!uint(cast(uint) value, tok.location, tok.spelling);
+			return Token.makeConstant!ulong(value, tok.location, tok.spelling);
+		default:
+			error(tok, "invalid suffix '%s' on integer constant", spelling);
+			assert(0);
+	}
+}
+
+Token ppTokenToToken(Token tok) pure @safe
+{
+	switch (tok.kind) with(TokenKind) {
+	case ppnumber:
+		return parseNumber(tok);
+	case identifier:
+		foreach (tk; __traits(allMembers, TokenKind)) {
+			static if (tk[$ - 1] == '_') {
+				if (tok.spelling == tk[0 .. $ - 1])
+					return Token(mixin(tk), tok.location, tok.spelling);
+			}
+		}
+		goto default;
+	default:
+		return tok;
+	}
+}
+
+unittest
+{
+	import std.conv : octal;
+
+	static auto ppnum(string spelling)
+	{
+		return Token(TokenKind.ppnumber, Location.init, spelling).ppTokenToToken;
+	}
+
+	static auto testppnum(T)(string spelling, TokenKind kind, T value)
+	{
+		auto token = ppnum(spelling);
+		assert(token.kind == kind);
+		if (kind == TokenKind.intconstant || kind == TokenKind.longconstant)
+			assert(token.signedInt64Value == value);
+		else if (kind == TokenKind.uintconstant || kind == TokenKind.ulongconstant)
+			assert(token.unsignedInt64Value == value);
+	}
+
+	crtest!("convert pp tokens to integer constants",
+		() {
+			with(TokenKind) {
+				testppnum("0", intconstant, 0);
+				testppnum("00017", intconstant, octal!17);
+				testppnum("0l", longconstant, 0);
+				testppnum("0ll", longconstant, 0);
+				testppnum("0x123", intconstant, 0x123);
+				testppnum("0x89aBcDef", uintconstant, 0x89abcdef);
+				testppnum("0x123u", uintconstant, 0x123);
+				testppnum("123", intconstant, 123);
+				testppnum("123u", uintconstant, 123);
+				testppnum("2147483653", longconstant, 0x80000005);
+				testppnum("2147483653U", uintconstant, 0x80000005);
+				testppnum("2147483653uL", ulongconstant, 0x80000005);
+				testppnum("4294967301", longconstant, 0x100000005);
+				testppnum("4294967301u", ulongconstant, 0x100000005);
+				testppnum("0xffffffffffffffff", ulongconstant, 0xffffffffffffffff);
+				testppnum("0xffffffffffffffffll", ulongconstant, 0xffffffffffffffff);
+				testppnum("0xffffffffffffffffU", ulongconstant, 0xffffffffffffffff);
+			}
+		});
+
+	crtest!("error on too large integer constant",
+		() {
+			assertThrown(ppnum("18446744073709551616"));
+			assertThrown(ppnum("0x10000000000000000"));
+		});
+
+	crtest!("error on invalid suffix on integer constant",
+		() {
+			assertThrown(ppnum("0x2ffgl"));
+		});
+}
+
+unittest
+{
+	with (TokenKind) {
+		[
+			Token(identifier, Location.init, "auto"),
+			Token(identifier, Location.init, "if"),
+			Token(identifier, Location.init, "static"),
+			Token(identifier, Location.init, "_Thread_local"),
+		]
+			.map!(t => t.ppTokenToToken.kind)
+			.assertEqual([auto_, if_, static_, _Thread_local_]);
 	}
 }
