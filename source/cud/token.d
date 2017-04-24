@@ -158,6 +158,12 @@ struct Location
 	string file; ///
 	uint line; ///
 	uint column; ///
+
+	void toString(scope void delegate(const(char)[]) dg)
+	{
+		import std.format : formattedWrite;
+		dg.formattedWrite("%s:%d,%d", file, line + 1, column + 1);
+	}
 }
 
 /// Represents a token or preprocessing token (pp-token)
