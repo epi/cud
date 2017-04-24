@@ -326,7 +326,7 @@ Token parseNumber(Token tok) pure @safe
 	ulong value = spelling.front - '0';
 	spelling.popFront;
 	if (spelling.empty)
-		return Token.makeConstant!int(0, tok.location, tok.spelling);
+		return Token.makeConstant!int(cast(int) value, tok.location, tok.spelling);
 	const base = () {
 		if (!value) {
 			if (spelling.length >= 2
@@ -433,6 +433,7 @@ unittest
 		() {
 			with(TokenKind) {
 				testppnum("0", intconstant, 0);
+				testppnum("2", intconstant, 2);
 				testppnum("00017", intconstant, octal!17);
 				testppnum("0l", longconstant, 0);
 				testppnum("0ll", longconstant, 0);
