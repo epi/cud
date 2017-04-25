@@ -242,14 +242,20 @@ struct Token
 ///
 void error(A...)(Token tok, const(char)[] format, auto ref A args)
 {
+	error(tok.location, format, args);
+}
+
+/// ditto
+void error(A...)(Location loc, const(char)[] format, auto ref A args)
+{
 	import std.format : formattedWrite;
 	import std.range : appender;
 	auto app = appender!string;
 	app.formattedWrite(
 		"%s(%d,%d): Error: ",
-		tok.location.file,
-		tok.location.line + 1,
-		tok.location.column + 1);
+		loc.file,
+		loc.line + 1,
+		loc.column + 1);
 	app.formattedWrite(format, args);
 	throw new Exception(app.data);
 }
