@@ -21,18 +21,25 @@ version(unittest) {
 
 enum UnaryOp
 {
-	postfixInc,
-	postfixDec,
-	prefixInc,
-	prefixDec,
-	addrOf,
-	dereference,
+	postDecrement,
+	postIncrement,
+	preDecrement,
+	preIncrement,
+	address,
+	indirection,
 	plus,
 	minus,
-	neg,
+	complement,
 	not,
+	sizeof_,
 }
 
+enum BinaryOp
+{
+	product,
+	quotient,
+	remainder,
+}
 
 class Type
 {
@@ -140,6 +147,49 @@ class MemberExpression : Expression
 	override void accept(ExpressionVisitor ev) { ev.visit(this); }
 }
 
+class SizeofExpression : Expression
+{
+	Type type;
+
+	this(Location location, Type type)
+	{
+		super(location, new BuiltinType!int, false);
+		this.type = type;
+	}
+
+	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+}
+
+class CastExpression : Expression
+{
+	Expression operand;
+
+	this(Location location, Type type, Expression operand)
+	{
+		super(location, type, false);
+		this.operand = operand;
+	}
+
+	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+}
+
+class BinaryExpression : Expression
+{
+	Expression lhs;
+	Expression rhs;
+	BinaryOp binaryOp;
+
+	this(Location location, BinaryOp op, Expression lhs, Expression rhs)
+	{
+		super(location, null, false);
+		this.binaryOp = op;
+		this.lhs = lhs;
+		this.rhs = rhs;
+	}
+
+	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+}
+
 interface ExpressionVisitor
 {
 	void visit(IntegerConstant expr);
@@ -147,6 +197,9 @@ interface ExpressionVisitor
 	void visit(CallExpression expr);
 	void visit(UnaryExpression expr);
 	void visit(MemberExpression expr);
+	void visit(SizeofExpression expr);
+	void visit(CastExpression expr);
+	void visit(BinaryExpression expr);
 }
 
 void print(Expression e)
@@ -195,6 +248,31 @@ void print(Expression e)
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.composite.accept(this);
 			}
+
+			void visit(SizeofExpression expr)
+			{
+				writefln("%s%s SizeofExpression %s",
+					indent, expr.location, typeid(expr.type));
+			}
+
+			void visit(CastExpression expr)
+			{
+				writefln("%s%s CastExpression %s",
+					indent, expr.location, typeid(expr.type));
+				indent ~= "  ";
+				scope(exit) indent = indent[0 .. $ - 2];
+				expr.operand.accept(this);
+			}
+
+			void visit(BinaryExpression expr)
+			{
+				writefln("%s%s BinaryExpression %s",
+					indent, expr.location, expr.binaryOp);
+				indent ~= "  ";
+				scope(exit) indent = indent[0 .. $ - 2];
+				expr.lhs.accept(this);
+				expr.rhs.accept(this);
+			}
 		});
 }
 
@@ -211,20 +289,24 @@ struct Parser {
 
 	ExpressionAt[size_t][parsers.length] memo_map;
 
-	Expression memo(string fun)(ref const(Token)[] input)
+	auto memo(string fun)(ref const(Token)[] input)
 	{
-		import std.meta : staticIndexOf;
+/+		import std.meta : staticIndexOf;
 		enum i = staticIndexOf!(fun, parsers);
 		static assert(i >= 0, "no such parser: " ~ fun);
 
 		if (auto pexpr = input.length in memo_map[i]) {
 			input = input[pexpr.length .. $];
 			return pexpr.expr;
-		}
+		}+/
 		size_t length_before = input.length;
-		Expression expr = mixin(fun ~ "(input)");
+		//writefln("trying %s on %d tokens", fun, length_before);
+		auto expr = mixin(fun ~ "(input)");
 		size_t length_after = input.length;
-		memo_map[i][length_before] = ExpressionAt(expr, length_after - length_before);
+		if (length_after < length_before) {
+		//	writefln("%s consumed %d tokens", fun, length_before - length_after);
+		}
+		//memo_map[i][length_before] = ExpressionAt(expr, length_after - length_before);
 		return expr;
 	}
 
@@ -349,8 +431,8 @@ struct Parser {
 				outer = new UnaryExpression(
 					tok.location,
 					tok.kind == plusplus
-						? UnaryOp.postfixInc
-						: UnaryOp.postfixDec,
+						? UnaryOp.postIncrement
+						: UnaryOp.postDecrement,
 					pe);
 				break;
 			default:
@@ -362,10 +444,162 @@ struct Parser {
 		assert(0);
 	}
 
+	/+
+	UnaryExpression < PostfixExpression
+		/ IncrementExpression
+		/ DecrementExpression
+		/ UnaryOperator CastExpression
+		/ "sizeof" UnaryExpression
+		/ "sizeof" '(' TypeName ')'
+
+	IncrementExpression < PlusPlus UnaryExpression
+
+	PlusPlus <- "++"
+
+	DecrementExpression < "--" UnaryExpression
+
+	UnaryOperator <- [-&*+~!]
+	+/
+	Expression parseUnaryExpression(ref const(Token)[] input)
+	{
+		const(Token)[] temp_input = input;
+		if (auto expr = memo!"parsePostfixExpression"(temp_input)) {
+			input = temp_input;
+			return expr;
+		}
+		const tok = temp_input.front;
+		temp_input.popFront;
+		UnaryOp op;
+		switch (tok.kind) with(TokenKind) {
+		case plusplus:
+			op = UnaryOp.preIncrement; goto unaryexpr;
+		case minusminus:
+			op = UnaryOp.postIncrement; goto unaryexpr;
+		case sizeof_:
+			op = UnaryOp.sizeof_; goto unaryexpr;
+		unaryexpr: {
+			auto expr = memo!"parseUnaryExpression"(temp_input);
+			if (expr) {
+				input = temp_input;
+				return new UnaryExpression(tok.location, op, expr);
+			} else {
+				if (temp_input.front.kind == lparen) {
+					temp_input.popFront;
+					auto type = memo!"parseTypeName"(temp_input);
+					if (!type || temp_input.front.kind != rparen)
+						return null;
+					temp_input.popFront;
+					input = temp_input;
+					return new SizeofExpression(tok.location, type);
+				}
+			}
+			assert(0);
+		}
+		case minus:
+			op = UnaryOp.minus; goto castexpr;
+		case and:
+			op = UnaryOp.address; goto castexpr;
+		case mul:
+			op = UnaryOp.indirection; goto castexpr;
+		case plus:
+			op = UnaryOp.plus; goto castexpr;
+		case tilde:
+			op = UnaryOp.complement; goto castexpr;
+		case not:
+			op = UnaryOp.not; goto castexpr;
+		castexpr: {
+			auto expr = memo!"parseCastExpression"(temp_input);
+			if (!expr)
+				return null;
+			input = temp_input;
+			return new UnaryExpression(tok.location, op, expr);
+		}
+		default:
+			return null;
+		}
+	}
+
+	/+
+	CastExpression < UnaryExpression
+		/ '(' TypeName ')' CastExpression
+	+/
+	Expression parseCastExpression(ref const(Token)[] input)
+	{
+		const(Token)[] temp_input = input;
+		if (auto expr = memo!"parseUnaryExpression"(temp_input)) {
+			input = temp_input;
+			return expr;
+		}
+		const tok = temp_input.front;
+		temp_input.popFront;
+		if (tok.kind == TokenKind.lparen) {
+			auto type = memo!"parseTypeName"(temp_input);
+			if (!type || temp_input.front.kind != TokenKind.rparen)
+				return null;
+			temp_input.popFront;
+			auto expr = memo!"parseCastExpression"(temp_input);
+			if (!expr)
+				return null;
+			input = temp_input;
+			return new CastExpression(tok.location, type, expr);
+		}
+		return null;
+	}
+
+	/+
+	MultiplicativeExpression    < CastExpression ([*%/] MultiplicativeExpression)*
+	+/
+	Expression parseMultiplicativeExpression(ref const(Token)[] input)
+	{
+		Expression[] operands;
+		BinaryOp[] operators;
+		Location[] locations;
+		const(Token)[] temp_input = input;
+		for (;;) {
+			auto expr = memo!"parseCastExpression"(temp_input);
+			if (!expr)
+				break;
+			operands ~= expr;
+			input = temp_input;
+			const tok = temp_input.front;
+			temp_input.popFront;
+			locations ~= tok.location;
+			switch (tok.kind) with(TokenKind) {
+				case mul: operators ~= BinaryOp.product; continue;
+				case mod: operators ~= BinaryOp.remainder; continue;
+				case div: operators ~= BinaryOp.quotient; continue;
+				default:
+			}
+			break;
+		}
+		if (!operands.length)
+			return null;
+		Expression result = operands[0];
+		operands.popFront;
+		while (operands.length) {
+			result = new BinaryExpression(locations[0], operators[0], result, operands[0]);
+			locations.popFront;
+			operands.popFront;
+			operators.popFront;
+		}
+		return result;
+	}
+
+	//TODO:
+	Type parseTypeName(ref const(Token)[] input)
+	{
+		switch (input.front.kind) with(TokenKind) {
+		case int_:
+			input.popFront;
+			return new BuiltinType!int;
+		default:
+			return null;
+		}
+	}
 
 	Expression parseExpression(ref const(Token)[] input)
 	{
-		return memo!"parsePostfixExpression"(input);
+		return memo!"parseMultiplicativeExpression"(input);
 	}
 
 }
@@ -421,14 +655,23 @@ unittest // primaryExpression
 
 unittest
 {
-	print(expr("42()"));
-	print(expr("(42).d"));
+//	print(expr("42()"));
+/+	print(expr("(42).d"));
 	print(expr("1()->d"));
-	print(expr("42(1, 2, 4)"));
+	print(expr("++1()->d"));
+	print(expr("sizeof(int)"));
+	print(expr("sizeof 1"));
+	print(expr("sizeof(1)"));+/
+//	print(expr("+(int)1"));
+
+//	print(expr("(int)++1()->d"));
+
+	print(expr("2 * (3 % (4 / 5)) + 2"));
+	/+	print(expr("42(1, 2, 4)"));
 	print(expr("42(1, 2, 4)()"));
 	print(expr("42(1, 2, 4)(2)"));
 	print(expr("42++"));
 	print(expr("42--"));
 	print(expr("42[42]"));
-	print(expr("42[]"));
+	print(expr("42[]"));+/
 }
