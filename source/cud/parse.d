@@ -34,13 +34,6 @@ enum UnaryOp
 	sizeof_,
 }
 
-enum BinaryOp
-{
-	product,
-	quotient,
-	remainder,
-}
-
 class Type
 {
 }
@@ -81,12 +74,6 @@ class IntegerConstant : Expression
 
 class IndexExpression : Expression
 {
-/+	this(Location location, Type type, ulong value)
-	{
-		super(location, type, false);
-		this.value = value;
-	}+/
-
 	Expression indexed;
 	Expression index;
 
@@ -103,13 +90,13 @@ class IndexExpression : Expression
 class CallExpression : Expression
 {
 	Expression callee;
-	Expression[] args;
+	Expression[] arguments;
 
 	this(Location location, Expression callee, Expression[] args)
 	{
 		super(location, null, true);
 		this.callee = callee;
-		this.args = args;
+		this.arguments = args;
 	}
 
 	override void accept(ExpressionVisitor ev) { ev.visit(this); }
@@ -177,14 +164,34 @@ class BinaryExpression : Expression
 {
 	Expression lhs;
 	Expression rhs;
-	BinaryOp binaryOp;
+	TokenKind binaryOp;
 
-	this(Location location, BinaryOp op, Expression lhs, Expression rhs)
+	this(Location location, TokenKind op, Expression lhs, Expression rhs)
 	{
 		super(location, null, false);
 		this.binaryOp = op;
 		this.lhs = lhs;
 		this.rhs = rhs;
+	}
+
+	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+}
+
+class ConditionalExpression : Expression
+{
+	Expression condition;
+	Expression trueExpression;
+	Expression falseExpression;
+
+	this(Location location,
+		Expression condition,
+		Expression trueExpression,
+		Expression falseExpression)
+	{
+		super(location, null, false);
+		this.condition = condition;
+		this.trueExpression = trueExpression;
+		this.falseExpression = falseExpression;
 	}
 
 	override void accept(ExpressionVisitor ev) { ev.visit(this); }
@@ -200,6 +207,7 @@ interface ExpressionVisitor
 	void visit(SizeofExpression expr);
 	void visit(CastExpression expr);
 	void visit(BinaryExpression expr);
+	void visit(ConditionalExpression expr);
 }
 
 void print(Expression e)
@@ -228,7 +236,7 @@ void print(Expression e)
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.callee.accept(this);
-				foreach (a; expr.args)
+				foreach (a; expr.arguments)
 					a.accept(this);
 			}
 
@@ -272,6 +280,17 @@ void print(Expression e)
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.lhs.accept(this);
 				expr.rhs.accept(this);
+			}
+
+			void visit(ConditionalExpression expr)
+			{
+				writefln("%s%s ConditionalExpression",
+					indent, expr.location);
+				indent ~= "  ";
+				scope(exit) indent = indent[0 .. $ - 2];
+				expr.condition.accept(this);
+				expr.trueExpression.accept(this);
+				expr.falseExpression.accept(this);
 			}
 		});
 }
@@ -474,7 +493,7 @@ struct Parser {
 		case plusplus:
 			op = UnaryOp.preIncrement; goto unaryexpr;
 		case minusminus:
-			op = UnaryOp.postIncrement; goto unaryexpr;
+			op = UnaryOp.preDecrement; goto unaryexpr;
 		case sizeof_:
 			op = UnaryOp.sizeof_; goto unaryexpr;
 		unaryexpr: {
@@ -482,18 +501,16 @@ struct Parser {
 			if (expr) {
 				input = temp_input;
 				return new UnaryExpression(tok.location, op, expr);
-			} else {
-				if (temp_input.front.kind == lparen) {
-					temp_input.popFront;
-					auto type = memo!"parseTypeName"(temp_input);
-					if (!type || temp_input.front.kind != rparen)
-						return null;
-					temp_input.popFront;
-					input = temp_input;
-					return new SizeofExpression(tok.location, type);
-				}
-			}
-			assert(0);
+			} else if (op == UnaryOp.sizeof_ && temp_input.front.kind == lparen) {
+				temp_input.popFront;
+				auto type = memo!"parseTypeName"(temp_input);
+				if (!type || temp_input.front.kind != rparen)
+					return null;
+				temp_input.popFront;
+				input = temp_input;
+				return new SizeofExpression(tok.location, type);
+			} else
+				return null;
 		}
 		case minus:
 			op = UnaryOp.minus; goto castexpr;
@@ -546,31 +563,29 @@ struct Parser {
 		return null;
 	}
 
-	/+
-	MultiplicativeExpression    < CastExpression ([*%/] MultiplicativeExpression)*
-	+/
-	Expression parseMultiplicativeExpression(ref const(Token)[] input)
+	Expression parseBinaryExpression(string subparser, tokenKinds...)(ref const(Token)[] input)
 	{
 		Expression[] operands;
-		BinaryOp[] operators;
+		TokenKind[] operators;
 		Location[] locations;
 		const(Token)[] temp_input = input;
 		for (;;) {
-			auto expr = memo!"parseCastExpression"(temp_input);
+			auto expr = memo!subparser(temp_input);
 			if (!expr)
 				break;
 			operands ~= expr;
 			input = temp_input;
 			const tok = temp_input.front;
 			temp_input.popFront;
-			locations ~= tok.location;
-			switch (tok.kind) with(TokenKind) {
-				case mul: operators ~= BinaryOp.product; continue;
-				case mod: operators ~= BinaryOp.remainder; continue;
-				case div: operators ~= BinaryOp.quotient; continue;
-				default:
+			foreach (tk; tokenKinds) {
+				if (tk == tok.kind) {
+					locations ~= tok.location;
+					operators ~= tk;
+					goto next;
+				}
 			}
 			break;
+		next:
 		}
 		if (!operands.length)
 			return null;
@@ -584,6 +599,115 @@ struct Parser {
 		}
 		return result;
 	}
+
+	// MultiplicativeExpression < CastExpression ([*%/] MultiplicativeExpression)*
+	Expression parseMultiplicativeExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseCastExpression",
+			TokenKind.mul, TokenKind.mod, TokenKind.div)(input);
+	}
+
+	// AdditiveExpression < MultiplicativeExpression ([-+] AdditiveExpression)*
+	Expression parseAdditiveExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseMultiplicativeExpression",
+			TokenKind.plus, TokenKind.minus)(input);
+	}
+
+	//ShiftExpression < AdditiveExpression (("<<" / ">>") ShiftExpression)*
+	Expression parseShiftExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseAdditiveExpression",
+			TokenKind.shl, TokenKind.shr)(input);
+	}
+
+	// RelationalExpression < ShiftExpression (("<=" / ">=" / "<" / ">") RelationalExpression)*
+	Expression parseRelationalExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseShiftExpression",
+			TokenKind.le, TokenKind.ge, TokenKind.lt, TokenKind.gt)(input);
+	}
+
+	// EqualityExpression < RelationalExpression (("==" / "!=") EqualityExpression)*
+	Expression parseEqualityExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseRelationalExpression",
+			TokenKind.equal, TokenKind.notequal)(input);
+	}
+
+	// ANDExpression < EqualityExpression ('&' ANDExpression)*
+	Expression parseAndExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseEqualityExpression", TokenKind.and)(input);
+	}
+
+	// ExclusiveORExpression < ANDExpression ('^' ExclusiveORExpression)*
+	Expression parseExclusiveOrExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseAndExpression", TokenKind.xor)(input);
+	}
+
+	// InclusiveORExpression < ExclusiveORExpression ('|' InclusiveORExpression)*
+	Expression parseInclusiveOrExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseExclusiveOrExpression", TokenKind.or)(input);
+	}
+
+	// LogicalANDExpression < InclusiveORExpression ("&&" LogicalANDExpression)*
+	Expression parseLogicalAndExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseInclusiveOrExpression", TokenKind.andand)(input);
+	}
+
+	// LogicalORExpression < LogicalANDExpression ("||" LogicalORExpression)*
+	Expression parseLogicalOrExpression(ref const(Token)[] input)
+	{
+		return parseBinaryExpression!("parseLogicalAndExpression", TokenKind.oror)(input);
+	}
+
+	// ConditionalExpression < LogicalORExpression ('?' Expression ':' ConditionalExpression)?
+	Expression parseConditionalExpression(ref const(Token)[] input)
+	{
+		const(Token)[] temp_input = input;
+		auto condition = parseLogicalOrExpression(temp_input);
+		if (!condition)
+			return null;
+		input = temp_input;
+		const qtok = temp_input.front;
+		if (qtok.kind != TokenKind.question)
+			return condition;
+		temp_input.popFront;
+		auto trueExpression = parseExpression(temp_input);
+		if (!trueExpression)
+			return condition;
+		if (temp_input.front.kind != TokenKind.colon)
+			return condition;
+		temp_input.popFront;
+		auto falseExpression = parseConditionalExpression(temp_input);
+		if (!falseExpression)
+			return condition;
+		input = temp_input;
+		return new ConditionalExpression(
+			qtok.location, condition, trueExpression, falseExpression);
+	}
+
+	// TODO:
+	/+
+	AssignmentExpression < UnaryExpression AssignmentOperator AssignmentExpression
+		/ ConditionalExpression
+	+/
+
+	/+
+	AssignmentOperator <- "=" / "*=" / "/=" / "%=" / "+=" / "-=" / "<<=" / ">>=" / "&=" / "^=" / "|="
+	+/
+
+	/+
+	Expression < AssignmentExpression (',' AssignmentExpression)*
+	+/
+
+	/+
+	ConstantExpression <- ConditionalExpression
+	+/
 
 	//TODO:
 	Type parseTypeName(ref const(Token)[] input)
@@ -599,7 +723,7 @@ struct Parser {
 
 	Expression parseExpression(ref const(Token)[] input)
 	{
-		return memo!"parseMultiplicativeExpression"(input);
+		return memo!"parseConditionalExpression"(input);
 	}
 
 }
@@ -655,23 +779,95 @@ unittest // primaryExpression
 
 unittest
 {
-//	print(expr("42()"));
-/+	print(expr("(42).d"));
-	print(expr("1()->d"));
-	print(expr("++1()->d"));
-	print(expr("sizeof(int)"));
-	print(expr("sizeof 1"));
-	print(expr("sizeof(1)"));+/
-//	print(expr("+(int)1"));
+	crtest!("can nest postfix operators",
+		() {
+			auto e = expr("1[42]()(2, 3)->a.b++").as!UnaryExpression;
+			assert(e.unaryOp == UnaryOp.postIncrement);
+			auto e1 = e.operand.as!MemberExpression;
+			assert(e1.memberName == "b");
+			assert(!e1.pointer);
+			auto c0 = e1.composite.as!MemberExpression;
+			assert(c0.memberName == "a");
+			assert(c0.pointer);
+			auto c1 = c0.composite.as!CallExpression;
+			assert(c1.arguments.length == 2);
+			assert(c1.arguments[0].as!IntegerConstant.value == 2);
+			assert(c1.arguments[1].as!IntegerConstant.value == 3);
+			auto c2 = c1.callee.as!CallExpression;
+			assert(c2.arguments.length == 0);
+			auto ind = c2.callee.as!IndexExpression;
+			assert(ind.indexed.as!IntegerConstant.value == 1);
+			assert(ind.index.as!IntegerConstant.value == 42);
+		});
 
-//	print(expr("(int)++1()->d"));
+	crtest!("binary operators are left-associative",
+		() {
+			auto e = expr("1 + 2 * 3 % 4 / 5 + 6").as!BinaryExpression;
+			assert(e.binaryOp == TokenKind.plus);
+			assert(e.rhs.as!IntegerConstant.value == 6);
+			auto add = e.lhs.as!BinaryExpression;
+			assert(add.binaryOp == TokenKind.plus);
+			assert(add.lhs.as!IntegerConstant.value == 1);
+			auto div = add.rhs.as!BinaryExpression;
+			assert(div.binaryOp == TokenKind.div);
+			assert(div.rhs.as!IntegerConstant.value == 5);
+			auto rem = div.lhs.as!BinaryExpression;
+			assert(rem.binaryOp == TokenKind.mod);
+			assert(rem.rhs.as!IntegerConstant.value == 4);
+			auto mul = rem.lhs.as!BinaryExpression;
+			assert(mul.binaryOp == TokenKind.mul);
+			assert(mul.rhs.as!IntegerConstant.value == 3);
+			assert(mul.lhs.as!IntegerConstant.value == 2);
+		});
 
-	print(expr("2 * (3 % (4 / 5)) + 2"));
-	/+	print(expr("42(1, 2, 4)"));
-	print(expr("42(1, 2, 4)()"));
-	print(expr("42(1, 2, 4)(2)"));
-	print(expr("42++"));
-	print(expr("42--"));
-	print(expr("42[42]"));
-	print(expr("42[]"));+/
+	crtest!("prefix operators can be nested",
+		() {
+			auto c = expr("(int)--*&1").as!CastExpression;
+			auto mm = c.operand.as!UnaryExpression;
+			assert(mm.unaryOp == UnaryOp.preDecrement);
+			auto ind = mm.operand.as!UnaryExpression;
+			assert(ind.unaryOp == UnaryOp.indirection);
+			auto ad = ind.operand.as!UnaryExpression;
+			assert(ad.unaryOp == UnaryOp.address);
+			assert(ad.operand.as!IntegerConstant.value == 1);
+		});
+
+	crtest!("?: is parsed alone",
+		() {
+			auto e = expr("1 ? 2 : 3").as!ConditionalExpression;
+			assert(e.condition.as!IntegerConstant.value == 1);
+			assert(e.trueExpression.as!IntegerConstant.value == 2);
+			assert(e.falseExpression.as!IntegerConstant.value == 3);
+		});
+
+	crtest!("?: has lower priority than ||",
+		() {
+			auto e = expr("1 || 2 ? 3 || 4 : 5 || 6").as!ConditionalExpression;
+			auto ce = e.condition.as!BinaryExpression;
+			assert(ce.binaryOp == TokenKind.oror);
+			assert(ce.lhs.as!IntegerConstant.value == 1);
+			assert(ce.rhs.as!IntegerConstant.value == 2);
+			auto te = e.trueExpression.as!BinaryExpression;
+			assert(te.binaryOp == TokenKind.oror);
+			assert(te.lhs.as!IntegerConstant.value == 3);
+			assert(te.rhs.as!IntegerConstant.value == 4);
+			auto fe = e.falseExpression.as!BinaryExpression;
+			assert(fe.binaryOp == TokenKind.oror);
+			assert(fe.lhs.as!IntegerConstant.value == 5);
+			assert(fe.rhs.as!IntegerConstant.value == 6);
+		});
+
+	crtest!("?: is right-associative",
+		() {
+			auto e = expr("1 ? 2 : 3 ? 4 : 5 ? 6 : 7").as!ConditionalExpression;
+			assert(e.condition.as!IntegerConstant.value == 1);
+			assert(e.trueExpression.as!IntegerConstant.value == 2);
+			auto e1 = e.falseExpression.as!ConditionalExpression;
+			assert(e1.condition.as!IntegerConstant.value == 3);
+			assert(e1.trueExpression.as!IntegerConstant.value == 4);
+			auto e2 = e1.falseExpression.as!ConditionalExpression;
+			assert(e2.condition.as!IntegerConstant.value == 5);
+			assert(e2.trueExpression.as!IntegerConstant.value == 6);
+			assert(e2.falseExpression.as!IntegerConstant.value == 7);
+		});
 }
