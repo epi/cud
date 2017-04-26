@@ -196,6 +196,14 @@ struct Token
 		}
 	}
 
+	void toString(scope void delegate(const(char)[]) dg) const
+	{
+		import std.format : formattedWrite;
+		if (!spelling.length)
+			dg.formattedWrite("[%s]", kind);
+		dg(spelling);
+	}
+
 	/// Allow testing for null token
 	bool opCast(T)() const pure nothrow @safe
 		if (is(T == bool))
