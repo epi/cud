@@ -10,6 +10,7 @@ module cud.parse;
 import std.range : front, popFront, empty;
 
 import cud.token;
+import cud.type;
 
 version(unittest) {
 	import std.algorithm : map, filter, equal;
@@ -34,14 +35,6 @@ enum UnaryOp
 	sizeof_,
 }
 
-class Type
-{
-}
-
-class BuiltinType(_DType) : Type
-{
-	alias DType = _DType;
-}
 
 class Expression
 {
@@ -134,14 +127,22 @@ class MemberExpression : Expression
 	override void accept(ExpressionVisitor ev) { ev.visit(this); }
 }
 
-class SizeofExpression : Expression
+enum TypeTrait
 {
-	Type type;
+	sizeof_,
+	alignof_,
+}
 
-	this(Location location, Type type)
+class TypeTraitExpression : Expression
+{
+	TypeTrait trait;
+	Type theType;
+
+	this(Location location, TypeTrait trait, Type type)
 	{
 		super(location, new BuiltinType!int, false);
-		this.type = type;
+		this.trait = trait;
+		this.theType = type;
 	}
 
 	override void accept(ExpressionVisitor ev) { ev.visit(this); }
@@ -204,7 +205,7 @@ interface ExpressionVisitor
 	void visit(CallExpression expr);
 	void visit(UnaryExpression expr);
 	void visit(MemberExpression expr);
-	void visit(SizeofExpression expr);
+	void visit(TypeTraitExpression expr);
 	void visit(CastExpression expr);
 	void visit(BinaryExpression expr);
 	void visit(ConditionalExpression expr);
@@ -257,10 +258,10 @@ void print(Expression e)
 				expr.composite.accept(this);
 			}
 
-			void visit(SizeofExpression expr)
+			void visit(TypeTraitExpression expr)
 			{
-				writefln("%s%s SizeofExpression %s",
-					indent, expr.location, typeid(expr.type));
+				writefln("%s%s TypeTraitExpression %s %s",
+					indent, expr.location, expr.trait, typeid(expr.type));
 			}
 
 			void visit(CastExpression expr)
@@ -544,7 +545,7 @@ struct Parser {
 					return null;
 				temp_input.popFront;
 				input = temp_input;
-				return new SizeofExpression(tok.location, type);
+				return new TypeTraitExpression(tok.location, TypeTrait.alignof_, type);
 			} else
 				return null;
 		}
@@ -762,14 +763,7 @@ struct Parser {
 		return memo!"parseConditionalExpression"(input);
 	}
 
-	/+
-	EnumSpecifier < "enum" ( Identifier ('{' EnumeratorList '}')?
-	                       / '{' EnumeratorList '}')
-
-	EnumeratorList < Enumerator (',' Enumerator)*
-
-	Enumerator < EnumerationConstant ('=' ConstantExpression)?
-	+/
+	// 6.7.2.2
 	EnumDeclaration parseEnumSpecifier(ref const(Token)[] input)
 	{
 		const(Token)[] temp_input = input;
@@ -839,6 +833,279 @@ struct Parser {
 		input = temp_input;
 		return new EnumDeclaration(decl_location, tag, list);
 	}
+
+	enum SpecifierSet
+	{
+		declarationSpecifiers,
+		specifierQualifierList,
+		typeQualifierList,
+	}
+
+	// 6.7. Declarations
+	// declaration-specifiers <
+	//  ( storage-class-specifier / type-specifier / type-qualifier / function-specifier / alignment-specifier )+
+	//
+	// 6.7.2.1. Structure and union specifiers
+	// 6.7.7. Type names
+	// specifier-qualifier-list <
+	//  ( type-specifier / type-qualifier )
+	//
+	// 6.7.6 Declarators
+	// type-qualifier-list <
+	//  type-qualifier+
+	auto parseSpecifiers(SpecifierSet set)(ref const(Token)[] ref_input)
+	{
+		struct Specifiers
+		{
+			// 6.7.3 Type qualifiers
+			Token const_;
+			Token restrict_;
+			Token volatile_;
+			Token _Atomic_;
+
+			// 6.7.2 Type specifiers
+			static if (set == SpecifierSet.specifierQualifierList || set == SpecifierSet.declarationSpecifiers) {
+				Token void_;
+				Token char_;
+				Token short_;
+				Token int_;
+				Token long_;
+				Token long_long_;
+				Token float_;
+				Token double_;
+				Token signed_;
+				Token unsigned_;
+				Token _Bool_;
+				Token _Complex_;
+				Token other;
+				Type type; // typedef, struct, union, enum, or atomic
+			}
+
+			// 6.7.1 Storage class specifiers
+			// 6.7.4 Function specifiers
+			// 6.7.5 Alignment specifier
+			static if (set == SpecifierSet.declarationSpecifiers) {
+				Token typedef_;
+				Token extern_;
+				Token static_;
+				Token _Thread_local_;
+				Token auto_;
+				Token register_;
+
+				Token inline_;
+				Token _Noreturn_;
+
+				Token _Alignas_;
+				Expression[] alignment;
+			}
+		}
+
+		Specifiers spec;
+
+		void checkConflicts(Token checked_token, Token*[] conflicting_specifiers...)
+		{
+			foreach (pspec; conflicting_specifiers) {
+				if (*pspec) {
+					error(checked_token.location,
+						"cannot combine '%s' with previous specifier '%s' at %s",
+						checked_token.spelling, pspec.spelling, pspec.location);
+					assert(0);
+				}
+			}
+		}
+
+		const(Token)[] input = ref_input;
+		for (;;) {
+			const tok = input.front;
+			switch (tok.kind) with(TokenKind) {
+				case const_:
+					spec.const_ = tok;
+					break;
+				case restrict_:
+					spec.restrict_ = tok;
+					break;
+				case volatile_:
+					spec.volatile_ = tok;
+					break;
+				case _Atomic_:
+					static if (set == SpecifierSet.typeQualifierList) {
+						spec._Atomic_ = tok;
+					} else static if (set == SpecifierSet.declarationSpecifiers
+						|| set == SpecifierSet.specifierQualifierList)
+					{
+						if (input[1].kind != lparen) {
+							spec._Atomic_ = tok;
+						} else {
+							checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+								&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+								&spec._Bool_, &spec._Complex_, &spec.other);
+							input = input[2 .. $];
+							spec.other = tok;
+							spec.type = new AtomicType(
+								() {
+									if (auto t = parseTypeName(input))
+										return t;
+									error(input.front.location,
+										"found '%s' when expecting type name in atomic type specifier",
+										input.front.spelling);
+									assert(0);
+								}());
+							if (input.front.kind != rparen) {
+								error(input.front.location,
+									"found '%s' when expecting ')' closing atomic type specifier",
+									input.front.spelling);
+								assert(0);
+							}
+						}
+					} else {
+						static assert(0);
+					}
+					break;
+				static if (set == SpecifierSet.specifierQualifierList
+					|| set == SpecifierSet.declarationSpecifiers)
+				{
+				case void_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+						&spec._Bool_, &spec._Complex_, &spec.other);
+					spec.void_ = tok;
+					break;
+				case char_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
+					spec.char_ = tok;
+					break;
+				case short_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.long_,
+						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
+					spec.short_ = tok;
+					break;
+				case int_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.int_,
+						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
+					spec.int_ = tok;
+					break;
+				case long_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.long_long_,
+						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
+					(spec.long_ ? spec.long_long_ : spec.long_) = tok;
+					break;
+				case float_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+						&spec.long_long_, &spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+						&spec._Bool_, &spec.other);
+					spec.float_ = tok;
+					break;
+				case double_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_,
+						&spec.long_long_, &spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+						&spec._Bool_, &spec.other);
+					spec.double_ = tok;
+					break;
+				case signed_:
+					checkConflicts(tok, &spec.void_, &spec.float_, &spec.double_, &spec.unsigned_,
+						&spec._Bool_, &spec.other);
+					spec.signed_ = tok;
+					break;
+				case unsigned_:
+					checkConflicts(tok, &spec.void_, &spec.float_, &spec.double_, &spec.signed_,
+						&spec._Bool_, &spec.other);
+					spec.unsigned_ = tok;
+					break;
+				case _Bool_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+						&spec._Bool_, &spec._Complex_, &spec.other);
+					spec._Bool_ = tok;
+					break;
+				case _Complex_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_,
+						&spec.long_long_, &spec.signed_, &spec.unsigned_, &spec._Bool_);
+					spec._Complex_ = tok;
+					break;
+				case enum_:
+					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
+						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
+						&spec._Bool_, &spec._Complex_, &spec.other);
+					spec.other = tok;
+						auto decl = parseEnumSpecifier(input);
+						// type = decl.type;
+					continue;
+				case struct_:
+				case union_:
+					assert(0);
+				}
+				static if (set == SpecifierSet.declarationSpecifiers) {
+				case typedef_:
+					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
+						&spec._Thread_local_, &spec.auto_, &spec.register_);
+					spec.typedef_ = tok;
+					break;
+				case extern_:
+					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
+						&spec.auto_, &spec.register_);
+					spec.extern_ = tok;
+					break;
+				case static_:
+					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
+						&spec.auto_, &spec.register_);
+					spec.static_ = tok;
+					break;
+				case _Thread_local_:
+					checkConflicts(tok, &spec.typedef_, &spec.auto_, &spec.register_);
+					spec._Thread_local_ = tok;
+					break;
+				case auto_:
+					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
+						&spec._Thread_local_, &spec.auto_, &spec.register_);
+					spec.auto_ = tok;
+					break;
+				case register_:
+					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
+						&spec._Thread_local_, &spec.auto_, &spec.register_);
+					spec.auto_ = tok;
+					break;
+				case inline_:
+					spec.inline_ = tok;
+					break;
+				case _Noreturn_:
+					spec._Noreturn_ = tok;
+					break;
+				case _Alignas_: {
+					spec._Alignas_ = tok;
+					input.popFront;
+					if (input.front.kind != lparen) {
+						error(input.front.location, "expected '(' after _Alignas, not '%s'",
+							input.front.spelling);
+						assert(0);
+					}
+					input.popFront;
+					Expression expr = parseConditionalExpression(input);
+					if (!expr) {
+						Type type = parseTypeName(input);
+						if (!type) {
+							error(input.front.location,
+								"expected constant expression or type name");
+							assert(0);
+						}
+						expr = new TypeTraitExpression(tok.location, TypeTrait.alignof_, type);
+					}
+					spec.alignment ~= expr;
+					if (input.front.kind != rparen) {
+						error(input.front.location, "expected ')'");
+						assert(0);
+					}
+					break;
+				}
+				}
+				default:
+					ref_input = input;
+					return spec;
+			}
+			input.popFront;
+		}
+	}
+
 }
 
 version(unittest)
@@ -1030,5 +1297,204 @@ unittest
 			assert(e.list[1].expression.as!IntegerConstant.value == 13);
 			assert(e.list[2].name == "quux");
 			assert(e.list[2].expression.as!IntegerConstant.value == 42);
+		});
+
+	crtest!("malformed enum spec",
+		() {
+			foreach (src; [
+					"enum",
+					"enum {}",
+					"enum { a",
+					"enum {,}",
+					"enum a {}",
+					"enum a {b",
+					"enum a {b,",
+					"enum a {,}",
+					"enum a {b=}",
+					"enum a {b=,}",
+				])
+			{
+				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+			}
+		});
+}
+
+unittest
+{
+	crtest!("parse type qualifiers",
+		() {
+			auto tq = parse!"Specifiers!(Parser.SpecifierSet.typeQualifierList)"(
+				"const volatile restrict int", TokenKind.int_);
+			assert(tq.const_);
+			assert(tq.volatile_);
+			assert(!tq._Atomic_);
+			assert(tq.restrict_);
+
+			tq = parse!"Specifiers!(Parser.SpecifierSet.typeQualifierList)"(
+				"_Atomic restrict typedef", TokenKind.typedef_);
+			assert(!tq.const_);
+			assert(!tq.volatile_);
+			assert(tq._Atomic_);
+			assert(tq.restrict_);
+		});
+
+	crtest!("parse declaration-specifiers",
+		() {
+			auto sq = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
+				"extern _Thread_local unsigned _Alignas(16) const _Alignas(int) *",
+				TokenKind.mul);
+			assert(sq.extern_);
+			assert(sq._Thread_local_);
+			assert(sq._Alignas_);
+			assert(sq.const_);
+			assert(sq.alignment.length == 2);
+			assert(sq.alignment[0].as!IntegerConstant.value == 16);
+			auto tt = sq.alignment[1].as!TypeTraitExpression;
+			assert(tt.trait == TypeTrait.alignof_);
+			assert(tt.theType.as!(BuiltinType!int));
+			assert(!sq.restrict_);
+			assert(!sq.volatile_);
+			assert(!sq._Atomic_);
+		});
+
+	crtest!("parse _Atomic(type)",
+		() {
+			auto sq = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
+				"const _Atomic(int)");
+			assert(!sq.extern_);
+			assert(!sq._Thread_local_);
+			assert(!sq._Alignas_);
+			assert(sq.const_);
+			assert(!sq.alignment);
+			assert(!sq.restrict_);
+			assert(!sq.volatile_);
+			assert(!sq._Atomic_);
+		});
+
+	crtest!("parse _Atomic _Atomic(type)",
+		() {
+			auto ds = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
+				"extern const _Atomic _Atomic(int)");
+			assert(ds.extern_);
+			assert(ds.const_);
+			assert(!ds.restrict_);
+			assert(!ds.volatile_);
+			assert(ds._Atomic_);
+		});
+
+	crtest!("parse specifier-qualifier-list",
+		() {
+			auto sq = parse!"Specifiers!(Parser.SpecifierSet.specifierQualifierList)"(
+				"const int long unsigned long volatile restrict _Atomic");
+			assert(sq.const_);
+			assert(sq.int_);
+			assert(sq.long_);
+			assert(sq.long_long_);
+			assert(sq.unsigned_);
+			assert(sq.volatile_);
+			assert(sq.restrict_);
+			assert(sq._Atomic_);
+			assert(!sq.other);
+			assert(!sq.short_);
+			assert(!sq.signed_);
+		});
+
+	crtest!("void combines with typedef",
+		() {
+			auto ds = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
+				"void typedef *", TokenKind.mul);
+			assert(ds.void_);
+			assert(ds.typedef_);
+		});
+
+	crtest!("error if conflicting type specifiers are given",
+		() {
+			foreach (src; [
+					"void int",
+					"int void",
+					"long _Atomic(int)",
+					"_Atomic(int) long",
+					"_Atomic(int) unsigned",
+					"_Atomic(int) int",
+					"float double",
+					"double float",
+					"long double int",
+					"long int double",
+					"double int long",
+					"long float",
+					"_Bool long",
+					"_Bool int",
+					"int _Bool",
+					"short char",
+					"short double",
+					"long short",
+					"short long",
+					"char int",
+					"unsigned signed",
+					"signed unsigned",
+					"_Complex int",
+					"int _Complex",
+					"enum { a } short",
+					"signed enum { a }",
+					"static typedef",
+					"static static",
+					"static extern",
+					"extern typedef",
+					"extern static",
+					"extern extern",
+					"typedef typedef",
+					"typedef static",
+					"typedef extern",
+					"auto typedef",
+					"auto static",
+					"auto extern",
+					"auto _Thread_local",
+					"auto auto",
+					"auto register",
+					"register typedef",
+					"register static",
+					"register extern",
+					"register _Thread_local",
+					"register auto",
+					"register register",
+				])
+			{
+				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+			}
+		});
+
+	crtest!("malformed _Atomic()",
+		() {
+			foreach (src; [
+					"_Atomic(",
+					"_Atomic(",
+					"_Atomic( foo)",
+					"_Atomic(,)",
+					"_Atomic(int",
+					"_Atomic(,",
+					"_Atomic()",
+				])
+			{
+				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+			}
+		});
+
+	crtest!("malformed _Alignas",
+		() {
+			foreach (src; [
+					"_Alignas int",
+					"_Alignas *",
+					"_Alignas foo",
+					"_Alignas (",
+					"_Alignas()",
+					"_Alignas(foo)",
+					"_Alignas(int",
+					"_Alignas(int foo",
+					"_Alignas(2",
+					"_Alignas(2 foo",
+				])
+			{
+				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+			}
 		});
 }
