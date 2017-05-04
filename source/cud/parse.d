@@ -334,37 +334,6 @@ class EnumDeclaration : Declaration
 
 struct Parser {
 	import std.meta : Filter;
-	enum isParser(string f) = f.length >= 5 && f[0 .. 5] == "parse";
-	enum parsers = Filter!(isParser, __traits(allMembers, typeof(this)));
-
-	static struct ExpressionAt
-	{
-		Expression expr;
-		size_t length;
-	}
-
-	ExpressionAt[size_t][parsers.length] memo_map;
-
-	auto memo(string fun)(ref const(Token)[] input)
-	{
-/+		import std.meta : staticIndexOf;
-		enum i = staticIndexOf!(fun, parsers);
-		static assert(i >= 0, "no such parser: " ~ fun);
-
-		if (auto pexpr = input.length in memo_map[i]) {
-			input = input[pexpr.length .. $];
-			return pexpr.expr;
-		}+/
-		size_t length_before = input.length;
-		//writefln("trying %s on %d tokens", fun, length_before);
-		auto expr = mixin(fun ~ "(input)");
-		size_t length_after = input.length;
-		if (length_after < length_before) {
-		//	writefln("%s consumed %d tokens", fun, length_before - length_after);
-		}
-		//memo_map[i][length_before] = ExpressionAt(expr, length_after - length_before);
-		return expr;
-	}
 
 	Expression parseAssignmentExpression(ref const(Token)[] input)
 	{
@@ -398,7 +367,7 @@ struct Parser {
 			case lparen: {
 				const(Token)[] temp_input = input;
 				temp_input.popFront;
-				Expression e = memo!"parseExpression"(temp_input);
+				Expression e = parseExpression(temp_input);
 				if (!e || temp_input.front.kind != TokenKind.rparen)
 					return null;
 				temp_input.popFront;
@@ -425,7 +394,7 @@ struct Parser {
 	Expression parsePostfixExpression(ref const(Token)[] input)
 	{
 		const(Token)[] temp_input = input;
-		Expression pe = memo!"parsePrimaryExpression"(temp_input);
+		Expression pe = parsePrimaryExpression(temp_input);
 		if (!pe)
 			return null;
 		input = temp_input;
@@ -435,7 +404,7 @@ struct Parser {
 			switch (tok.kind) with(TokenKind) {
 			case lbracket: {
 				temp_input.popFront;
-				Expression e = memo!"parseExpression"(temp_input);
+				Expression e = parseExpression(temp_input);
 				if (!e || temp_input.front.kind != rbracket)
 					break;
 				temp_input.popFront;
@@ -448,7 +417,7 @@ struct Parser {
 				Expression[] args;
 				if (temp_input.front.kind != rparen) {
 					for (;;) {
-						Expression e = memo!"parseAssignmentExpression"(temp_input);
+						Expression e = parseAssignmentExpression(temp_input);
 						if (!e)
 							break;
 						if (temp_input.front.kind == comma) {
@@ -519,7 +488,7 @@ struct Parser {
 	Expression parseUnaryExpression(ref const(Token)[] input)
 	{
 		const(Token)[] temp_input = input;
-		if (auto expr = memo!"parsePostfixExpression"(temp_input)) {
+		if (auto expr = parsePostfixExpression(temp_input)) {
 			input = temp_input;
 			return expr;
 		}
@@ -534,13 +503,13 @@ struct Parser {
 		case sizeof_:
 			op = UnaryOp.sizeof_; goto unaryexpr;
 		unaryexpr: {
-			auto expr = memo!"parseUnaryExpression"(temp_input);
+			auto expr = parseUnaryExpression(temp_input);
 			if (expr) {
 				input = temp_input;
 				return new UnaryExpression(tok.location, op, expr);
 			} else if (op == UnaryOp.sizeof_ && temp_input.front.kind == lparen) {
 				temp_input.popFront;
-				auto type = memo!"parseTypeName"(temp_input);
+				auto type = parseTypeName(temp_input);
 				if (!type || temp_input.front.kind != rparen)
 					return null;
 				temp_input.popFront;
@@ -562,7 +531,7 @@ struct Parser {
 		case not:
 			op = UnaryOp.not; goto castexpr;
 		castexpr: {
-			auto expr = memo!"parseCastExpression"(temp_input);
+			auto expr = parseCastExpression(temp_input);
 			if (!expr)
 				return null;
 			input = temp_input;
@@ -580,18 +549,18 @@ struct Parser {
 	Expression parseCastExpression(ref const(Token)[] input)
 	{
 		const(Token)[] temp_input = input;
-		if (auto expr = memo!"parseUnaryExpression"(temp_input)) {
+		if (auto expr = parseUnaryExpression(temp_input)) {
 			input = temp_input;
 			return expr;
 		}
 		const tok = temp_input.front;
 		temp_input.popFront;
 		if (tok.kind == TokenKind.lparen) {
-			auto type = memo!"parseTypeName"(temp_input);
+			auto type = parseTypeName(temp_input);
 			if (!type || temp_input.front.kind != TokenKind.rparen)
 				return null;
 			temp_input.popFront;
-			auto expr = memo!"parseCastExpression"(temp_input);
+			auto expr = parseCastExpression(temp_input);
 			if (!expr)
 				return null;
 			input = temp_input;
@@ -607,7 +576,7 @@ struct Parser {
 		Location[] locations;
 		const(Token)[] temp_input = input;
 		for (;;) {
-			auto expr = memo!subparser(temp_input);
+			auto expr = mixin(subparser ~ "(temp_input)");
 			if (!expr)
 				break;
 			operands ~= expr;
@@ -760,7 +729,7 @@ struct Parser {
 
 	Expression parseExpression(ref const(Token)[] input)
 	{
-		return memo!"parseConditionalExpression"(input);
+		return parseConditionalExpression(input);
 	}
 
 	// 6.7.2.2
