@@ -1106,6 +1106,98 @@ struct Parser {
 		}
 	}
 
+	static struct Declarator
+	{
+		Type type;
+		string identifier;
+	}
+
+	Type parsePointer(ref const(Token)[] ref_input, Type type)
+	{
+		while (ref_input.front.kind == TokenKind.mul) {
+			type = new PointerType(type);
+			ref_input.popFront;
+			auto qualifiers = parseSpecifiers!(SpecifierSet.typeQualifierList)(ref_input);
+			if (qualifiers.const_ || qualifiers.restrict_ || qualifiers.volatile_) {
+				type = new QualifiedType(type,
+					qualifiers.const_    ? Qualifiers.const_ : Qualifiers.none,
+					qualifiers.restrict_ ? Qualifiers.restrict_ : Qualifiers.none,
+					qualifiers.volatile_ ? Qualifiers.volatile_ : Qualifiers.none);
+			}
+			if (qualifiers._Atomic_)
+				type = new AtomicType(type);
+		}
+		return type;
+	}
+
+	Type parseDeclaratorBrackets(ref const(Token)[] ref_input)
+	{
+		const tok = ref_input.front;
+		switch (tok.kind) {
+		case TokenKind.lparen:
+			assert(0);
+		case TokenKind.lbracket:
+			assert(0);
+		default:
+			return null;
+		}
+	}
+
+	Declarator parseDeclarator(ref const(Token)[] ref_input, Type type = null)
+	{
+		const(Token)[] paren_decl;
+		const(Token)[] input = ref_input;
+		string identifier;
+		type = parsePointer(input, type);
+		const tok = input.front;
+		if (tok.kind == TokenKind.lparen) {
+			input.popFront;
+			paren_decl = input;
+			int nest = 1;
+			while (nest) {
+				switch (input.front.kind) {
+				case TokenKind.lparen:
+					nest++;
+					break;
+				case TokenKind.rparen:
+					nest--;
+					break;
+				case TokenKind.eof:
+				case TokenKind.semicolon:
+					error(input.front.location, "expected ')'");
+					assert(0);
+				default:
+				}
+				input.popFront;
+			}
+		} else if (tok.kind == TokenKind.identifier) {
+			identifier = input.front.spelling;
+			input.popFront;
+		} else {
+			error(tok.location, "expected identifier");
+			assert(0);
+		}
+
+		if (auto t = parseDeclaratorBrackets(input))
+			type = t;
+
+		if (paren_decl) {
+			auto result = parseDeclarator(paren_decl, type);
+			if (paren_decl.front.kind != TokenKind.rparen) {
+				error(paren_decl.front.location,
+					"expected ')' after declarator, not '%s'",
+					paren_decl.front.spelling);
+				assert(0);
+			}
+			type = result.type;
+			identifier = result.identifier;
+		}
+
+		ref_input = input;
+		return Declarator(type, identifier);
+	}
+
+
 }
 
 version(unittest)
@@ -1495,6 +1587,51 @@ unittest
 				])
 			{
 				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+			}
+		});
+}
+
+unittest
+{
+	crtest!("parse declarators with pointers and qualifiers",
+		() {
+			auto decl = parse!"Declarator"(`foo`);
+			assert(decl.identifier == "foo");
+
+			decl = parse!"Declarator"(`*bar`);
+			assert(decl.identifier == "bar");
+			assert(decl.type.toString == "ptr(0)");
+
+			decl = parse!"Declarator"(`*(bar)`);
+			assert(decl.identifier == "bar");
+			assert(decl.type.toString == "ptr(0)");
+
+			decl = parse!"Declarator"(`*const baz`);
+			assert(decl.identifier == "baz");
+			assert(decl.type.toString == "const(ptr(0))");
+
+			decl = parse!"Declarator"(`* const _Atomic * restrict ** volatile * const restrict volatile quux`);
+			assert(decl.identifier == "quux");
+			assert(decl.type.toString ==
+				"const restrict volatile(ptr(volatile(ptr(ptr(restrict(ptr(_Atomic(const(ptr(0))))))))))");
+		});
+
+	crtest!("malformed declarator",
+		() {
+			foreach (src; [
+					"* const",
+					"*(",
+					"((",
+					"((dar)",
+					"*(int)",
+					"()",
+					"*()",
+					"*())",
+					"(foo bar)",
+					"(*foo bar)",
+				])
+			{
+				assertThrown(parse!"Declarator"(src), src);
 			}
 		});
 }
