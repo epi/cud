@@ -715,16 +715,64 @@ struct Parser {
 	ConstantExpression <- ConditionalExpression
 	+/
 
-	//TODO:
-	Type parseTypeName(ref const(Token)[] input)
+	static Type specifiersToType(S)(ref S spec, bool implicit_int = false)
 	{
-		switch (input.front.kind) with(TokenKind) {
-		case int_:
-			input.popFront;
-			return new BuiltinType!int;
-		default:
-			return null;
+		if (spec.long_long_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.slonglong_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulonglong_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.longlong_);
+		} else if (spec.long_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.slong_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.long_);
+		} else if (spec.short_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.sshort_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ushort_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+		} else {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.sint_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.uint_);
+			else if (spec.int_ || implicit_int)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.int_);
 		}
+		return null;
+
+	}
+
+	/+
+	type-name:
+		specifier-qualifier-list abstract-declarator?
+
+	abstract-declarator:
+		pointer
+		pointer? direct-abstract-declarator
+
+	direct-abstract-declarator:
+		( abstract-declarator )
+		direct-abstract-declarator? [ type-qualifier-list? assignment-expression? ]
+		direct-abstract-declarator? [ static type-qualifier-list? assignment-expression ]
+		direct-abstract-declarator? [ type-qualifier-list static assignment-expression ]
+		direct-abstract-declarator? [ * ]
+		direct-abstract-declarator? ( parameter-type-list opt )
+	+/
+	Type parseTypeName(ref const(Token)[] ref_input)
+	{
+		const(Token)[] input = ref_input;
+		auto specifiers = parseSpecifiers!(SpecifierSet.specifierQualifierList)(input);
+
+		ref_input = input;
+		return specifiersToType(specifiers);
 	}
 
 	Expression parseExpression(ref const(Token)[] input)
@@ -1412,7 +1460,7 @@ unittest
 			assert(sq.alignment[0].as!IntegerConstant.value == 16);
 			auto tt = sq.alignment[1].as!TypeTraitExpression;
 			assert(tt.trait == TypeTrait.alignof_);
-			assert(tt.theType.as!(BuiltinType!int));
+			assert(tt.theType.as!BaseBuiltinType.kind == BaseBuiltinType.kind.int_);
 			assert(!sq.restrict_);
 			assert(!sq.volatile_);
 			assert(!sq._Atomic_);
@@ -1601,6 +1649,28 @@ unittest
 				])
 			{
 				assertThrown(parse!"Declarator"(src), src);
+			}
+		});
+}
+
+unittest
+{
+	crtest!("parse type name",
+		() {
+			foreach (src, type_str; [
+					"int"           : "int",
+				/+	"int *"         : "ptr(int)",
+					"int *[3]"      : "array[3](ptr(int))",
+					"int (*)[3]"    : "ptr(array[3](int))",
+					"int (*)[*]"    : "ptr(vlarray[?](int))",
+					"int *()"       : "func(?:ptr(int))",
+					"int (*)(void)" : "func(:int)",
+					"int (*const [])(unsigned int, ...)"
+					                : "array[?](const(ptr(func(uint,...:int))))"+/
+				])
+			{
+				import std.conv : text;
+				assert(parse!"TypeName"(src).toString == type_str, text(src, " !=> ", type_str));
 			}
 		});
 }

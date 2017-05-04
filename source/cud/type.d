@@ -16,12 +16,54 @@ class Type
 
 class BaseBuiltinType : Type
 {
+	enum Kind {
+		void_,
+		bool_,
+		char_,
+		schar_,
+		uchar_,
+		wchar_,
+		char16_,
+		char32_,
+		short_,
+		sshort_,
+		ushort_,
+		int_,
+		sint_,
+		uint_,
+		long_,
+		slong_,
+		ulong_,
+		longlong_,
+		slonglong_,
+		ulonglong_,
+		float_,
+		double_,
+		longdouble_,
+		float_Complex_,
+		double_Complex_,
+		longdouble_Complex_,
+	}
+
+	Kind kind;
+
+	this(Kind kind)
+	{
+		this.kind = kind;
+	}
+
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
 }
 
+deprecated
 class BuiltinType(_DType) : BaseBuiltinType
 {
 	alias DType = _DType;
+
+	this()
+	{
+		super(mixin("BaseBuiltinType.Kind." ~ _DType.stringof ~ "_"));
+	}
 }
 
 class AtomicType : Type
@@ -104,7 +146,8 @@ void format(Type t, scope void delegate(in char[]) dg)
 
 			void visit(BaseBuiltinType type)
 			{
-				dg("builtin");
+				import std.conv : to;
+				dg(type.kind.to!string[0 .. $ - 1]);
 			}
 
 			void visit(QualifiedType type)
