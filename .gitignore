@@ -8,3 +8,4 @@ __test__*__
 cud-test-library
 cud.dproj
 docs
+*.lst
