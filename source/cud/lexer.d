@@ -234,7 +234,7 @@ auto tokenize(R)(R input)
 
 		@property bool empty() const pure nothrow
 		{
-			return current.kind == TokenKind.eof;
+			return current.kind == tk!`eof`;
 		}
 
 		@property Token front() const pure nothrow
@@ -277,11 +277,11 @@ auto tokenize(R)(R input)
 			for (;;) {
 				if (n + 2 <= l.length) {
 					if (l[n .. n + 2] == "*/")
-						return Tok(TokenKind.space, n + 2);
+						return Tok(tk!`space`, n + 2);
 					n++;
 				} else {
 					if (!nextLine())
-						return Tok(TokenKind.eof, 0);
+						return Tok(tk!`eof`, 0);
 					l = line;
 					n = 0;
 				}
@@ -319,208 +319,197 @@ auto tokenize(R)(R input)
 					continue;
 				}
 				if (c != '.' && !c.isDigitOrNonDigit)
-					return Tok(TokenKind.ppnumber, n);
+					return Tok(tk!`ppnumber`, n);
 				n++;
 			}
-			return Tok(TokenKind.ppnumber, n);
+			return Tok(tk!`ppnumber`, n);
 		}
 
 		private auto scan()
 		{
-			with (TokenKind) {
-				auto l = line;
-				if (l.length == 0)
-					return Tok(newline, 0);
-				char c = l[0];
+			import std.meta : aliasSeqOf;
+			import std.string : split;
 
-				if (c.isSpace) {
-					size_t n = 1;
-					while (n < line.length && line[n].isSpace)
-						n++;
-					return Tok(space, n);
-				}
+			auto l = line;
+			if (l.length == 0)
+				return Tok(tk!`newline`, 0);
+			char c = l[0];
 
-				switch (c) {
-					case '/':
-						if (l.length > 1) {
-							char d = l[1];
-							if (d == '/')
-								return Tok(space, line.length);
-							if (d == '*')
-								return lexMultiLineComment();
-							if (d == '=')
-								return Tok(divassign, 2);
-						}
-						return Tok(div, 1);
-					case '[':
-						return Tok(lbracket, 1);
-					case ']':
-						return Tok(rbracket, 1);
-					case '{':
-						return Tok(lcurly, 1);
-					case '}':
-						return Tok(rcurly, 1);
-					case '(':
-						return Tok(lparen, 1);
-					case ')':
-						return Tok(rparen, 1);
-					case '.':
-						if (l.length >= 2) {
-							if (l[1].isDigit)
-								return lexPpNumber(1);
-							else if (l.length >= 3 && l[1 .. 3] == "..")
-								return Tok(ellipsis, 3);
-						}
-						return Tok(dot, 1);
-					case '-':
-						if (l.length >= 2) {
-						auto d = l[1];
-							if (d == '-')
-								return Tok(minusminus, 2);
-							else if (d == '=')
-								return Tok(minusassign, 2);
-							else if (d == '>')
-								return Tok(ptr, 2);
-						}
-						return Tok(minus, 1);
-					case '+':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '+')
-								return Tok(plusplus, 2);
-							else if (d == '=')
-								return Tok(plusassign, 2);
-						}
-						return Tok(plus, 1);
-					case '&':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '&')
-								return Tok(andand, 2);
-							else if (d == '=')
-								return Tok(andassign, 2);
-						}
-						return Tok(and, 1);
-					case '*':
-						if (l.length >= 2 && l[1] == '=')
-							return Tok(mulassign, 2);
-						return Tok(mul, 1);
-					case '~':
-						return Tok(tilde, 1);
-					case '!':
-						if (l.length >= 2 && l[1] == '=')
-							return Tok(notequal, 2);
-						return Tok(not, 1);
-					case '%':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '=')
-								return Tok(modassign, 2);
-							else if (d == '>')
-								return Tok(rcurly, 2);
-							else if (d == ':') {
-								if (l.length >= 4 && l[2 .. 4] == "%:")
-									return Tok(hashhash, 4);
-								return Tok(hash, 2);
-							}
-						}
-						return Tok(mod, 1);
-					case '<':
-						if (includeState == IncludeState.include) {
-							size_t i = 1;
-							while (i < l.length && l[i] != '>')
-								i++;
-							if (i == l.length)
-								error("Unterminated header name");
-							return Tok(headername, i + 1);
-						} else if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '=')
-								return Tok(le, 2);
-							else if (d == '%')
-								return Tok(lcurly, 2);
-							else if (d == ':')
-								return Tok(lbracket, 2);
-							else if (d == '<') {
-								if (l.length >= 3 && l[2] == '=')
-									return Tok(shlassign, 3);
-								return Tok(shl, 2);
-							}
-						}
-						return Tok(lt, 1);
-					case '>':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '=')
-								return Tok(ge, 2);
-							else if (d == '>') {
-								if (l.length >= 3 && l[2] == '=')
-									return Tok(shrassign, 3);
-								return Tok(shr, 2);
-							}
-						}
-						return Tok(gt, 1);
-					case '=':
-						if (l.length >= 2 && l[1] == '=')
-							return Tok(equal, 2);
-						return Tok(assign, 1);
-					case '^':
-						if (l.length >= 2 && l[1] == '=')
-							return Tok(xorassign, 2);
-						return Tok(xor, 1);
-					case '|':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '|')
-								return Tok(oror, 2);
-							else if (d == '=')
-								return Tok(orassign, 2);
-						}
-						return Tok(or, 1);
-					case '?':
-						return Tok(question, 1);
-					case ':':
-						if (l.length >= 2 && l[1] == '>')
-							return Tok(rbracket, 2);
-						return Tok(colon, 1);
-					case ';':
-						return Tok(semicolon, 1);
-					case ',':
-						return Tok(comma, 1);
-					case '#':
-						if (l.length >= 2 && l[1] == '#')
-							return Tok(hashhash, 2);
-						return Tok(hash, 1);
-					case '"':
-						return Tok(
-							includeState == IncludeState.include ? headername : stringliteral,
-							lexCharOrStringLiteral(1, '"'));
-					case '\'':
-						return Tok(charconstant, lexCharOrStringLiteral(1, '\''));
-					case '0': .. case '9':
-						return lexPpNumber(0);
-					case 'u': case 'U': case 'L':
-						if (l.length >= 2) {
-							auto d = l[1];
-							if (d == '"' || d == '\'')
-								return Tok(d == '"' ? stringliteral : charconstant, lexCharOrStringLiteral(2, d));
-						}
-						goto case;
-					case 'A': .. case 'K':
-					case 'M': .. case 'T':
-					case 'V': .. case 'Z':
-					case 'a': .. case 't':
-					case 'v': .. case 'z':
-					case '_': {
-						size_t i = 1;
-						while (i < l.length && l[i].isDigitOrNonDigit)
-							i++;
-						return Tok(identifier, i);
+			if (c.isSpace) {
+				size_t n = 1;
+				while (n < line.length && line[n].isSpace)
+					n++;
+				return Tok(tk!`space`, n);
+			}
+
+			switch (c) {
+			foreach (t; aliasSeqOf!(`[ ] { } ( ) ~ ? ; ,`.split)) {
+				case t[0]:
+					return Tok(tk!t, 1);
+			}
+				case '/':
+					if (l.length > 1) {
+						char d = l[1];
+						if (d == '/')
+							return Tok(tk!`space`, line.length);
+						if (d == '*')
+							return lexMultiLineComment();
+						if (d == '=')
+							return Tok(tk!`/=`, 2);
 					}
-					default:
-						// TODO: other tokens
-						return Tok(reserved, 1);
+					return Tok(tk!`/`, 1);
+				case '.':
+					if (l.length >= 2) {
+						if (l[1].isDigit)
+							return lexPpNumber(1);
+						else if (l.length >= 3 && l[1 .. 3] == "..")
+							return Tok(tk!`...`, 3);
+					}
+					return Tok(tk!`.`, 1);
+				case '-':
+					if (l.length >= 2) {
+					auto d = l[1];
+						if (d == '-')
+							return Tok(tk!`--`, 2);
+						else if (d == '=')
+							return Tok(tk!`-=`, 2);
+						else if (d == '>')
+							return Tok(tk!`->`, 2);
+					}
+					return Tok(tk!`-`, 1);
+				case '+':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '+')
+							return Tok(tk!`++`, 2);
+						else if (d == '=')
+							return Tok(tk!`+=`, 2);
+					}
+					return Tok(tk!`+`, 1);
+				case '&':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '&')
+							return Tok(tk!`&&`, 2);
+						else if (d == '=')
+							return Tok(tk!`&=`, 2);
+					}
+					return Tok(tk!`&`, 1);
+				case '*':
+					if (l.length >= 2 && l[1] == '=')
+						return Tok(tk!`*=`, 2);
+					return Tok(tk!`*`, 1);
+				case '!':
+					if (l.length >= 2 && l[1] == '=')
+						return Tok(tk!`!=`, 2);
+					return Tok(tk!`!`, 1);
+				case '%':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '=')
+							return Tok(tk!`%=`, 2);
+						else if (d == '>')
+							return Tok(tk!`}`, 2);
+						else if (d == ':') {
+							if (l.length >= 4 && l[2 .. 4] == "%:")
+								return Tok(tk!`##`, 4);
+							return Tok(tk!`#`, 2);
+						}
+					}
+					return Tok(tk!`%`, 1);
+				case '<':
+					if (includeState == IncludeState.include) {
+						size_t i = 1;
+						while (i < l.length && l[i] != '>')
+							i++;
+						if (i == l.length)
+							error("Unterminated header name");
+						return Tok(tk!`headername`, i + 1);
+					} else if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '=')
+							return Tok(tk!`<=`, 2);
+						else if (d == '%')
+							return Tok(tk!`{`, 2);
+						else if (d == ':')
+							return Tok(tk!`[`, 2);
+						else if (d == '<') {
+							if (l.length >= 3 && l[2] == '=')
+								return Tok(tk!`<<=`, 3);
+							return Tok(tk!`<<`, 2);
+						}
+					}
+					return Tok(tk!`<`, 1);
+				case '>':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '=')
+							return Tok(tk!`>=`, 2);
+						else if (d == '>') {
+							if (l.length >= 3 && l[2] == '=')
+								return Tok(tk!`>>=`, 3);
+							return Tok(tk!`>>`, 2);
+						}
+					}
+					return Tok(tk!`>`, 1);
+				case '=':
+					if (l.length >= 2 && l[1] == '=')
+						return Tok(tk!`==`, 2);
+					return Tok(tk!`=`, 1);
+				case '^':
+					if (l.length >= 2 && l[1] == '=')
+						return Tok(tk!`^=`, 2);
+					return Tok(tk!`^`, 1);
+				case '|':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '|')
+							return Tok(tk!`||`, 2);
+						else if (d == '=')
+							return Tok(tk!`|=`, 2);
+					}
+					return Tok(tk!`|`, 1);
+				case ':':
+					if (l.length >= 2 && l[1] == '>')
+						return Tok(tk!`]`, 2);
+					return Tok(tk!`:`, 1);
+				case '#':
+					if (l.length >= 2 && l[1] == '#')
+						return Tok(tk!`##`, 2);
+					return Tok(tk!`#`, 1);
+				case '"':
+					return Tok(
+						includeState == IncludeState.include
+							? tk!`headername` : tk!`stringliteral`,
+						lexCharOrStringLiteral(1, '"'));
+				case '\'':
+					return Tok(tk!`charconst`, lexCharOrStringLiteral(1, '\''));
+				case '0': .. case '9':
+					return lexPpNumber(0);
+				case 'u': case 'U': case 'L':
+					if (l.length >= 2) {
+						auto d = l[1];
+						if (d == '"' || d == '\'')
+							return Tok(d == '"'
+								? tk!`stringliteral`
+								: tk!`charconst`,
+								lexCharOrStringLiteral(2, d));
+					}
+					goto case;
+				case 'A': .. case 'K':
+				case 'M': .. case 'T':
+				case 'V': .. case 'Z':
+				case 'a': .. case 't':
+				case 'v': .. case 'z':
+				case '_': {
+					size_t i = 1;
+					while (i < l.length && l[i].isDigitOrNonDigit)
+						i++;
+					return Tok(tk!`identifier`, i);
 				}
+				default:
+					// TODO: other tokens
+					return Tok(tk!``, 1);
 			}
 		}
 
@@ -531,20 +520,20 @@ auto tokenize(R)(R input)
 				line = line[len .. $];
 			} else {
 				if (!nextLine()) {
-					current.kind = TokenKind.eof;
+					current.kind = tk!`eof`;
 					return;
 				}
 			}
 			auto tok = scan();
 
 			// context-dependent lexing of header-names
-			if (tok.kind == TokenKind.hash)
+			if (tok.kind == tk!`#`)
 				includeState = IncludeState.hash;
 			else if (includeState == IncludeState.hash
-				&& tok.kind == TokenKind.identifier
+				&& tok.kind == tk!`identifier`
 				&& line[0 .. tok.length] == "include")
 				includeState = IncludeState.include;
-			else if (tok.kind == TokenKind.space)
+			else if (tok.kind == tk!`space`)
 			{}
 			else
 				includeState = IncludeState.none;
@@ -574,15 +563,15 @@ unittest
 				" comment */   \n/* short */\n/*ignore unterminated comment")
 					.split.merge.tokenize,
 				[
-					Token(TokenKind.newline, Location("", 0, 0), ""), // merger cuts spaces at the end of line
-					Token(TokenKind.space,   Location("", 1, 0), " "),
-					Token(TokenKind.space,   Location("", 1, 1), "// line comment"),
-					Token(TokenKind.newline, Location("", 1, 16), ""),
-					Token(TokenKind.space,   Location("", 2, 0), "   "),
-					Token(TokenKind.space,   Location("", 6, 0), " comment */"),
-					Token(TokenKind.newline, Location("", 6, 11), ""),
-					Token(TokenKind.space,   Location("", 7, 0), "/* short */"),
-					Token(TokenKind.newline, Location("", 7, 11), ""),
+					Token(tk!`newline`, Location("", 0, 0), ""), // merger cuts spaces at the end of line
+					Token(tk!`space`,   Location("", 1, 0), " "),
+					Token(tk!`space`,   Location("", 1, 1), "// line comment"),
+					Token(tk!`newline`, Location("", 1, 16), ""),
+					Token(tk!`space`,   Location("", 2, 0), "   "),
+					Token(tk!`space`,   Location("", 6, 0), " comment */"),
+					Token(tk!`newline`, Location("", 6, 11), ""),
+					Token(tk!`space`,   Location("", 7, 0), "/* short */"),
+					Token(tk!`newline`, Location("", 7, 11), ""),
 				]);
 		});
 }
@@ -591,23 +580,21 @@ unittest
 {
 	crtest!("lex punctuators",
 		() {
-			with (TokenKind) {
-				assertEqual(
-					("[](){}.->++--&*+-~!/%<<>><><=>===!=^|&&||?:;..." ~
-					"=*=/=%=+=-=<<=>>=&=^=|=,###<::><%%>%:%:%:")
-						.split.merge.tokenize.map!(a => a.kind),
-					[
-						lbracket, rbracket, lparen, rparen, lcurly, rcurly, dot, ptr,
-						plusplus, minusminus, and, mul, plus, minus, tilde, not,
-						div, mod, shl, shr, lt, gt, le, ge, equal, notequal, xor, or, andand, oror,
-						question, colon, semicolon, ellipsis,
-						assign, mulassign, divassign, modassign, plusassign, minusassign,
-						shlassign, shrassign, andassign, xorassign, orassign,
-						comma, hashhash, hash,
-						lbracket, rbracket, lcurly, rcurly, hashhash, hash,
-						newline
-					]);
-			}
+			assertEqual(
+				("[](){}.->++--&*+-~!/%<<>><><=>===!=^|&&||?:;..." ~
+				"=*=/=%=+=-=<<=>>=&=^=|=,###<::><%%>%:%:%:")
+					.split.merge.tokenize.map!(a => a.kind),
+				[
+					tks!`[ ] ( ) { } . ->`,
+					tks!`++ -- & * + - ~ !`,
+					tks!`/ % << >> < > <= >= == != ^ | && ||`,
+					tks!`? : ; ...`,
+					tks!`= *= /= %= += -=`,
+					tks!`<<= >>= &= ^= |=`,
+					tks!`, ## #`,
+					tks!`[ ] { } ## #`,
+					tks!`newline`
+				]);
 		});
 }
 
@@ -619,20 +606,20 @@ unittest
 				"#include <stdio.h>\n<foo\"foo\"\n#include \"foo\""
 					.split.merge.tokenize,
 				[
-					Token(TokenKind.hash,          Location("", 0, 0), "#"),
-					Token(TokenKind.identifier,    Location("", 0, 1), "include"),
-					Token(TokenKind.space,         Location("", 0, 8), " "),
-					Token(TokenKind.headername,    Location("", 0, 9), "<stdio.h>"),
-					Token(TokenKind.newline,       Location("", 0, 18), ""),
-					Token(TokenKind.lt,            Location("", 1, 0), "<"),
-					Token(TokenKind.identifier,    Location("", 1, 1), "foo"),
-					Token(TokenKind.stringliteral, Location("", 1, 4), `"foo"`),
-					Token(TokenKind.newline,       Location("", 1, 9), ""),
-					Token(TokenKind.hash,          Location("", 2, 0), "#"),
-					Token(TokenKind.identifier,    Location("", 2, 1), "include"),
-					Token(TokenKind.space,         Location("", 2, 8), " "),
-					Token(TokenKind.headername,    Location("", 2, 9), `"foo"`),
-					Token(TokenKind.newline,       Location("", 2, 14), ""),
+					Token(tk!`#`,             Location("", 0, 0), "#"),
+					Token(tk!`identifier`,    Location("", 0, 1), "include"),
+					Token(tk!`space`,         Location("", 0, 8), " "),
+					Token(tk!`headername`,    Location("", 0, 9), "<stdio.h>"),
+					Token(tk!`newline`,       Location("", 0, 18), ""),
+					Token(tk!`<`,             Location("", 1, 0), "<"),
+					Token(tk!`identifier`,    Location("", 1, 1), "foo"),
+					Token(tk!`stringliteral`, Location("", 1, 4), `"foo"`),
+					Token(tk!`newline`,       Location("", 1, 9), ""),
+					Token(tk!`#`,             Location("", 2, 0), "#"),
+					Token(tk!`identifier`,    Location("", 2, 1), "include"),
+					Token(tk!`space`,         Location("", 2, 8), " "),
+					Token(tk!`headername`,    Location("", 2, 9), `"foo"`),
+					Token(tk!`newline`,       Location("", 2, 14), ""),
 				]);
 		});
 }
@@ -649,17 +636,15 @@ unittest
 					"#", "include", " ", "<1/a.h>", "",
 					"#", "define", " ", "const", ".", "member", "@", "$", ""
 				]);
-			with (TokenKind) {
-				assertEqual(
-					str.split.merge.tokenize.map!(t => t.kind),
-					[
-						ppnumber, lt, ppnumber, div, identifier, dot,
-						identifier, gt, ppnumber, newline,
-						hash, identifier, space, headername, newline,
-						hash, identifier, space, identifier, dot, identifier,
-						reserved, reserved, newline
-					]);
-			}
+			assertEqual(
+				str.split.merge.tokenize.map!(t => t.kind),
+				[
+					tks!`ppnumber < ppnumber / identifier .`,
+					tks!`identifier > ppnumber newline`,
+					tks!`# identifier space headername newline`,
+					tks!`# identifier space identifier . identifier`,
+					tk!``, tk!``, tk!`newline`
+				]);
 		});
 }
 
@@ -674,21 +659,19 @@ unittest
 					`'a'`, `"foo"`, `L'x20'`, `L"bar"`,
 					`u'x'`, `U'x'`, `u"foo"`, `U"bar"`, ""
 				]);
-			with (TokenKind) {
-				assertEqual(str.split.merge.tokenize.map!(t => t.kind),
-					[
-						charconstant, stringliteral, charconstant, stringliteral,
-						charconstant, charconstant, stringliteral, stringliteral, newline
-					]);
-			}
+			assertEqual(str.split.merge.tokenize.map!(t => t.kind),
+				[
+					tks!`charconst stringliteral charconst stringliteral`,
+					tks!`charconst charconst stringliteral stringliteral newline`
+				]);
 		});
 }
 
 Token pasteTokens(Token lhs, Token rhs) pure
 {
-	if (rhs.kind == TokenKind.placemarker)
+	if (rhs.kind == tk!`placemarker`)
 		return lhs;
-	if (lhs.kind == TokenKind.placemarker)
+	if (lhs.kind == tk!`placemarker`)
 		return rhs;
 	string spelling = lhs.spelling ~ rhs.spelling;
 	auto line = Line(lhs.location.line, spelling, lhs.location.file, null);

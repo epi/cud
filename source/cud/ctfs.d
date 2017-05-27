@@ -31,12 +31,13 @@ private template collectHeaderNames(string[] names, uint num_scanned)
 	import std.algorithm : filter, map, joiner, sort, uniq, canFind;
 	import std.range : array;
 	import std.typecons : tuple;
-	import cud.preprocessor : split, merge, tokenize, TokenKind;
+	import cud.token;
+	import cud.lexer : split, merge, tokenize;
 
 	enum includedHeaderNames =
 		importAll!(names[num_scanned .. $])
 			.map!(src => src.split.merge.tokenize
-				.filter!(token => token.kind == TokenKind.headername && token.spelling.length >= 3)
+				.filter!(token => token.kind == tk!`headername` && token.spelling.length >= 3)
 				.map!(token => token.spelling[1 .. $ - 1]))
 			.joiner
 			.filter!(h => !names.canFind(h))

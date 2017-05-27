@@ -20,22 +20,6 @@ version(unittest) {
 	import cud.test;
 }
 
-enum UnaryOp
-{
-	postDecrement,
-	postIncrement,
-	preDecrement,
-	preIncrement,
-	address,
-	indirection,
-	plus,
-	minus,
-	complement,
-	not,
-	sizeof_,
-}
-
-
 class Expression
 {
 	Location location;
@@ -98,9 +82,9 @@ class CallExpression : Expression
 class UnaryExpression : Expression
 {
 	Expression operand;
-	UnaryOp unaryOp;
+	TokenKind unaryOp;
 
-	this(Location location, UnaryOp op, Expression sube)
+	this(Location location, TokenKind op, Expression sube)
 	{
 		super(location, null, false);
 		unaryOp = op;
@@ -351,24 +335,24 @@ struct Parser {
 	Expression parsePrimaryExpression(ref const(Token)[] input)
 	{
 		const tok = input.front;
-		switch (tok.kind) with(TokenKind) {
-			case intconstant:
+		switch (tok.kind) {
+			case tk!`intconst`:
 				input.popFront;
 				return new IntegerConstant(tok.location, new BuiltinType!int, tok.signedInt64Value);
-			case uintconstant:
+			case tk!`uintconst`:
 				input.popFront;
 				return new IntegerConstant(tok.location, new BuiltinType!uint, tok.unsignedInt64Value);
-			case longconstant:
+			case tk!`longconst`:
 				input.popFront;
 				return new IntegerConstant(tok.location, new BuiltinType!long, tok.signedInt64Value);
-			case ulongconstant:
+			case tk!`ulongconst`:
 				input.popFront;
 				return new IntegerConstant(tok.location, new BuiltinType!ulong, tok.unsignedInt64Value);
-			case lparen: {
+			case tk!`(`: {
 				const(Token)[] temp_input = input;
 				temp_input.popFront;
 				Expression e = parseExpression(temp_input);
-				if (!e || temp_input.front.kind != TokenKind.rparen)
+				if (!e || temp_input.front.kind != tk!`)`)
 					return null;
 				temp_input.popFront;
 				input = temp_input;
@@ -401,29 +385,29 @@ struct Parser {
 		for (;;) {
 			Expression outer;
 			const tok = temp_input.front;
-			switch (tok.kind) with(TokenKind) {
-			case lbracket: {
+			switch (tok.kind) {
+			case tk!`[`: {
 				temp_input.popFront;
 				Expression e = parseExpression(temp_input);
-				if (!e || temp_input.front.kind != rbracket)
+				if (!e || temp_input.front.kind != tk!`]`)
 					break;
 				temp_input.popFront;
 				input = temp_input;
 				outer = new IndexExpression(tok.location, pe, e);
 				break;
 			}
-			case lparen: {
+			case tk!`(`: {
 				temp_input.popFront;
 				Expression[] args;
-				if (temp_input.front.kind != rparen) {
+				if (temp_input.front.kind != tk!`)`) {
 					for (;;) {
 						Expression e = parseAssignmentExpression(temp_input);
 						if (!e)
 							break;
-						if (temp_input.front.kind == comma) {
+						if (temp_input.front.kind == tk!`,`) {
 							args ~= e;
 							temp_input.popFront;
-						} else if (temp_input.front.kind == rparen) {
+						} else if (temp_input.front.kind == tk!`)`) {
 							args ~= e;
 							break;
 						} else {
@@ -431,33 +415,32 @@ struct Parser {
 						}
 					}
 				}
-				if (temp_input.front.kind == rparen) {
+				if (temp_input.front.kind == tk!`)`) {
 					temp_input.popFront;
 					input = temp_input;
 					outer = new CallExpression(tok.location, pe, args);
 				}
 				break;
 			}
-			case ptr:
-			case dot: {
+			case tk!`->`:
+			case tk!`.`: {
 				temp_input.popFront;
-				if (temp_input.front.kind == identifier) {
+				if (temp_input.front.kind == tk!`identifier`) {
 					auto ident = temp_input.front.spelling;
 					temp_input.popFront;
 					input = temp_input;
-					outer = new MemberExpression(tok.location, pe, ident, tok.kind == ptr);
+					outer = new MemberExpression(
+						tok.location, pe, ident, tok.kind == tk!`->`);
 				}
 				break;
 			}
-			case plusplus:
-			case minusminus:
+			case tk!`++`:
+			case tk!`--`:
 				temp_input.popFront;
 				input = temp_input;
 				outer = new UnaryExpression(
 					tok.location,
-					tok.kind == plusplus
-						? UnaryOp.postIncrement
-						: UnaryOp.postDecrement,
+					tok.kind == tk!`++` ? tk!`post++` : tk!`post--`,
 					pe);
 				break;
 			default:
@@ -494,23 +477,19 @@ struct Parser {
 		}
 		const tok = temp_input.front;
 		temp_input.popFront;
-		UnaryOp op;
-		switch (tok.kind) with(TokenKind) {
-		case plusplus:
-			op = UnaryOp.preIncrement; goto unaryexpr;
-		case minusminus:
-			op = UnaryOp.preDecrement; goto unaryexpr;
-		case sizeof_:
-			op = UnaryOp.sizeof_; goto unaryexpr;
+		switch (tok.kind) {
+		foreach (t; tks!`++ -- sizeof`) {
+			case t: goto unaryexpr;
+		}
 		unaryexpr: {
 			auto expr = parseUnaryExpression(temp_input);
 			if (expr) {
 				input = temp_input;
-				return new UnaryExpression(tok.location, op, expr);
-			} else if (op == UnaryOp.sizeof_ && temp_input.front.kind == lparen) {
+				return new UnaryExpression(tok.location, tok.kind, expr);
+			} else if (tok.kind == tk!`sizeof` && temp_input.front.kind == tk!`(`) {
 				temp_input.popFront;
 				auto type = parseTypeName(temp_input);
-				if (!type || temp_input.front.kind != rparen)
+				if (!type || temp_input.front.kind != tk!`)`)
 					return null;
 				temp_input.popFront;
 				input = temp_input;
@@ -518,24 +497,15 @@ struct Parser {
 			} else
 				return null;
 		}
-		case minus:
-			op = UnaryOp.minus; goto castexpr;
-		case and:
-			op = UnaryOp.address; goto castexpr;
-		case mul:
-			op = UnaryOp.indirection; goto castexpr;
-		case plus:
-			op = UnaryOp.plus; goto castexpr;
-		case tilde:
-			op = UnaryOp.complement; goto castexpr;
-		case not:
-			op = UnaryOp.not; goto castexpr;
+		foreach (t; tks!`- & * + ~ !`) {
+			case t: goto castexpr;
+		}
 		castexpr: {
 			auto expr = parseCastExpression(temp_input);
 			if (!expr)
 				return null;
 			input = temp_input;
-			return new UnaryExpression(tok.location, op, expr);
+			return new UnaryExpression(tok.location, tok.kind, expr);
 		}
 		default:
 			return null;
@@ -555,9 +525,9 @@ struct Parser {
 		}
 		const tok = temp_input.front;
 		temp_input.popFront;
-		if (tok.kind == TokenKind.lparen) {
+		if (tok.kind == tk!`(`) {
 			auto type = parseTypeName(temp_input);
-			if (!type || temp_input.front.kind != TokenKind.rparen)
+			if (!type || temp_input.front.kind != tk!`)`)
 				return null;
 			temp_input.popFront;
 			auto expr = parseCastExpression(temp_input);
@@ -569,7 +539,8 @@ struct Parser {
 		return null;
 	}
 
-	Expression parseBinaryExpression(string subparser, tokenKinds...)(ref const(Token)[] input)
+	Expression parseBinaryExpression(string subparser, tokenKinds...)(
+		ref const(Token)[] input)
 	{
 		Expression[] operands;
 		TokenKind[] operators;
@@ -610,65 +581,65 @@ struct Parser {
 	Expression parseMultiplicativeExpression(ref const(Token)[] input)
 	{
 		return parseBinaryExpression!("parseCastExpression",
-			TokenKind.mul, TokenKind.mod, TokenKind.div)(input);
+			tk!`*`, tk!`%`, tk!`/`)(input);
 	}
 
 	// AdditiveExpression < MultiplicativeExpression ([-+] AdditiveExpression)*
 	Expression parseAdditiveExpression(ref const(Token)[] input)
 	{
 		return parseBinaryExpression!("parseMultiplicativeExpression",
-			TokenKind.plus, TokenKind.minus)(input);
+			tk!`+`, tk!`-`)(input);
 	}
 
 	//ShiftExpression < AdditiveExpression (("<<" / ">>") ShiftExpression)*
 	Expression parseShiftExpression(ref const(Token)[] input)
 	{
 		return parseBinaryExpression!("parseAdditiveExpression",
-			TokenKind.shl, TokenKind.shr)(input);
+			tk!`<<`, tk!`>>`)(input);
 	}
 
 	// RelationalExpression < ShiftExpression (("<=" / ">=" / "<" / ">") RelationalExpression)*
 	Expression parseRelationalExpression(ref const(Token)[] input)
 	{
 		return parseBinaryExpression!("parseShiftExpression",
-			TokenKind.le, TokenKind.ge, TokenKind.lt, TokenKind.gt)(input);
+			tk!`<=`, tk!`>=`, tk!`<`, tk!`>`)(input);
 	}
 
 	// EqualityExpression < RelationalExpression (("==" / "!=") EqualityExpression)*
 	Expression parseEqualityExpression(ref const(Token)[] input)
 	{
 		return parseBinaryExpression!("parseRelationalExpression",
-			TokenKind.equal, TokenKind.notequal)(input);
+			tk!`==`, tk!`!=`)(input);
 	}
 
 	// ANDExpression < EqualityExpression ('&' ANDExpression)*
 	Expression parseAndExpression(ref const(Token)[] input)
 	{
-		return parseBinaryExpression!("parseEqualityExpression", TokenKind.and)(input);
+		return parseBinaryExpression!("parseEqualityExpression", tk!`&`)(input);
 	}
 
 	// ExclusiveORExpression < ANDExpression ('^' ExclusiveORExpression)*
 	Expression parseExclusiveOrExpression(ref const(Token)[] input)
 	{
-		return parseBinaryExpression!("parseAndExpression", TokenKind.xor)(input);
+		return parseBinaryExpression!("parseAndExpression", tk!`^`)(input);
 	}
 
 	// InclusiveORExpression < ExclusiveORExpression ('|' InclusiveORExpression)*
 	Expression parseInclusiveOrExpression(ref const(Token)[] input)
 	{
-		return parseBinaryExpression!("parseExclusiveOrExpression", TokenKind.or)(input);
+		return parseBinaryExpression!("parseExclusiveOrExpression", tk!`|`)(input);
 	}
 
 	// LogicalANDExpression < InclusiveORExpression ("&&" LogicalANDExpression)*
 	Expression parseLogicalAndExpression(ref const(Token)[] input)
 	{
-		return parseBinaryExpression!("parseInclusiveOrExpression", TokenKind.andand)(input);
+		return parseBinaryExpression!("parseInclusiveOrExpression", tk!`&&`)(input);
 	}
 
 	// LogicalORExpression < LogicalANDExpression ("||" LogicalORExpression)*
 	Expression parseLogicalOrExpression(ref const(Token)[] input)
 	{
-		return parseBinaryExpression!("parseLogicalAndExpression", TokenKind.oror)(input);
+		return parseBinaryExpression!("parseLogicalAndExpression", tk!`||`)(input);
 	}
 
 	// ConditionalExpression < LogicalORExpression ('?' Expression ':' ConditionalExpression)?
@@ -680,13 +651,13 @@ struct Parser {
 			return null;
 		input = temp_input;
 		const qtok = temp_input.front;
-		if (qtok.kind != TokenKind.question)
+		if (qtok.kind != tk!`?`)
 			return condition;
 		temp_input.popFront;
 		auto trueExpression = parseExpression(temp_input);
 		if (!trueExpression)
 			return condition;
-		if (temp_input.front.kind != TokenKind.colon)
+		if (temp_input.front.kind != tk!`:`)
 			return condition;
 		temp_input.popFront;
 		auto falseExpression = parseConditionalExpression(temp_input);
@@ -789,12 +760,12 @@ struct Parser {
 
 		Token tok = temp_input.front;
 		string tag;
-		if (tok.kind == TokenKind.identifier) {
+		if (tok.kind == tk!`identifier`) {
 			tag = tok.spelling;
 			temp_input.popFront;
 			tok = temp_input.front;
 		}
-		if (tok.kind != TokenKind.lcurly) {
+		if (tok.kind != tk!`{`) {
 			if (!tag) {
 				error(tok.location, "found '%s' when expecting identifier or '{' after 'enum'",
 					tok.spelling);
@@ -808,11 +779,11 @@ struct Parser {
 		EnumConstantDeclaration[] list;
 		for (;;) {
 			const id_tok = temp_input.front;
-			if (id_tok.kind == TokenKind.rcurly) {
+			if (id_tok.kind == tk!`}`) {
 				temp_input.popFront;
 				break;
 			}
-			if (id_tok.kind != TokenKind.identifier) {
+			if (id_tok.kind != tk!`identifier`) {
 				error(tok.location, "expected identifier, not '%s'", id_tok.spelling);
 				assert(0);
 			}
@@ -820,7 +791,7 @@ struct Parser {
 			Expression expr;
 			temp_input.popFront;
 			tok = temp_input.front;
-			if (tok.kind == TokenKind.assign) {
+			if (tok.kind == tk!`=`) {
 				temp_input.popFront;
 				expr = parseConditionalExpression(temp_input);
 				if (!expr) {
@@ -833,11 +804,11 @@ struct Parser {
 				tok = temp_input.front;
 			}
 			list ~= new EnumConstantDeclaration(id_tok.location, name, expr);
-			if (tok.kind == TokenKind.rcurly) {
+			if (tok.kind == tk!`}`) {
 				temp_input.popFront;
 				break;
 			}
-			if (tok.kind != TokenKind.comma) {
+			if (tok.kind != tk!`,`) {
 				error(tok.location, "expected ',', not '%s'", tok.spelling);
 				assert(0);
 			}
@@ -934,23 +905,23 @@ struct Parser {
 		const(Token)[] input = ref_input;
 		for (;;) {
 			const tok = input.front;
-			switch (tok.kind) with(TokenKind) {
-				case const_:
+			switch (tok.kind) {
+				case tk!`const`:
 					spec.const_ = tok;
 					break;
-				case restrict_:
+				case tk!`restrict`:
 					spec.restrict_ = tok;
 					break;
-				case volatile_:
+				case tk!`volatile`:
 					spec.volatile_ = tok;
 					break;
-				case _Atomic_:
+				case tk!`_Atomic`:
 					static if (set == SpecifierSet.typeQualifierList) {
 						spec._Atomic_ = tok;
 					} else static if (set == SpecifierSet.declarationSpecifiers
 						|| set == SpecifierSet.specifierQualifierList)
 					{
-						if (input[1].kind != lparen) {
+						if (input[1].kind != tk!`(`) {
 							spec._Atomic_ = tok;
 						} else {
 							checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
@@ -967,7 +938,7 @@ struct Parser {
 										input.front.spelling);
 									assert(0);
 								}());
-							if (input.front.kind != rparen) {
+							if (input.front.kind != tk!`)`) {
 								error(input.front.location,
 									"found '%s' when expecting ')' closing atomic type specifier",
 									input.front.spelling);
@@ -981,66 +952,66 @@ struct Parser {
 				static if (set == SpecifierSet.specifierQualifierList
 					|| set == SpecifierSet.declarationSpecifiers)
 				{
-				case void_:
+				case tk!`void`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
 						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
 						&spec._Bool_, &spec._Complex_, &spec.other);
 					spec.void_ = tok;
 					break;
-				case char_:
+				case tk!`char`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
 						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
 					spec.char_ = tok;
 					break;
-				case short_:
+				case tk!`short`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.long_,
 						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
 					spec.short_ = tok;
 					break;
-				case int_:
+				case tk!`int`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.int_,
 						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
 					spec.int_ = tok;
 					break;
-				case long_:
+				case tk!`long`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.long_long_,
 						&spec.float_, &spec.double_, &spec._Bool_, &spec._Complex_, &spec.other);
 					(spec.long_ ? spec.long_long_ : spec.long_) = tok;
 					break;
-				case float_:
+				case tk!`float`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
 						&spec.long_long_, &spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
 						&spec._Bool_, &spec.other);
 					spec.float_ = tok;
 					break;
-				case double_:
+				case tk!`double`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_,
 						&spec.long_long_, &spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
 						&spec._Bool_, &spec.other);
 					spec.double_ = tok;
 					break;
-				case signed_:
+				case tk!`signed`:
 					checkConflicts(tok, &spec.void_, &spec.float_, &spec.double_, &spec.unsigned_,
 						&spec._Bool_, &spec.other);
 					spec.signed_ = tok;
 					break;
-				case unsigned_:
+				case tk!`unsigned`:
 					checkConflicts(tok, &spec.void_, &spec.float_, &spec.double_, &spec.signed_,
 						&spec._Bool_, &spec.other);
 					spec.unsigned_ = tok;
 					break;
-				case _Bool_:
+				case tk!`_Bool`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
 						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
 						&spec._Bool_, &spec._Complex_, &spec.other);
 					spec._Bool_ = tok;
 					break;
-				case _Complex_:
+				case tk!`_Complex`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_,
 						&spec.long_long_, &spec.signed_, &spec.unsigned_, &spec._Bool_);
 					spec._Complex_ = tok;
 					break;
-				case enum_:
+				case tk!`enum`:
 					checkConflicts(tok, &spec.void_, &spec.char_, &spec.short_, &spec.int_, &spec.long_,
 						&spec.float_, &spec.double_, &spec.signed_, &spec.unsigned_,
 						&spec._Bool_, &spec._Complex_, &spec.other);
@@ -1048,50 +1019,50 @@ struct Parser {
 						auto decl = parseEnumSpecifier(input);
 						// type = decl.type;
 					continue;
-				case struct_:
-				case union_:
+				case tk!`struct`:
+				case tk!`union`:
 					assert(0);
 				}
 				static if (set == SpecifierSet.declarationSpecifiers) {
-				case typedef_:
+				case tk!`typedef`:
 					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
 						&spec._Thread_local_, &spec.auto_, &spec.register_);
 					spec.typedef_ = tok;
 					break;
-				case extern_:
+				case tk!`extern`:
 					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
 						&spec.auto_, &spec.register_);
 					spec.extern_ = tok;
 					break;
-				case static_:
+				case tk!`static`:
 					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
 						&spec.auto_, &spec.register_);
 					spec.static_ = tok;
 					break;
-				case _Thread_local_:
+				case tk!`_Thread_local`:
 					checkConflicts(tok, &spec.typedef_, &spec.auto_, &spec.register_);
 					spec._Thread_local_ = tok;
 					break;
-				case auto_:
+				case tk!`auto`:
 					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
 						&spec._Thread_local_, &spec.auto_, &spec.register_);
 					spec.auto_ = tok;
 					break;
-				case register_:
+				case tk!`register`:
 					checkConflicts(tok, &spec.typedef_, &spec.static_, &spec.extern_,
 						&spec._Thread_local_, &spec.auto_, &spec.register_);
 					spec.auto_ = tok;
 					break;
-				case inline_:
+				case tk!`inline`:
 					spec.inline_ = tok;
 					break;
-				case _Noreturn_:
+				case tk!`_Noreturn`:
 					spec._Noreturn_ = tok;
 					break;
-				case _Alignas_: {
+				case tk!`_Alignas`: {
 					spec._Alignas_ = tok;
 					input.popFront;
-					if (input.front.kind != lparen) {
+					if (input.front.kind != tk!`(`) {
 						error(input.front.location, "expected '(' after _Alignas, not '%s'",
 							input.front.spelling);
 						assert(0);
@@ -1108,7 +1079,7 @@ struct Parser {
 						expr = new TypeTraitExpression(tok.location, TypeTrait.alignof_, type);
 					}
 					spec.alignment ~= expr;
-					if (input.front.kind != rparen) {
+					if (input.front.kind != tk!`)`) {
 						error(input.front.location, "expected ')'");
 						assert(0);
 					}
@@ -1131,7 +1102,7 @@ struct Parser {
 
 	Type parsePointer(ref const(Token)[] ref_input, Type type)
 	{
-		while (ref_input.front.kind == TokenKind.mul) {
+		while (ref_input.front.kind == tk!`*`) {
 			type = new PointerType(type);
 			ref_input.popFront;
 			auto qualifiers = parseSpecifiers!(SpecifierSet.typeQualifierList)(ref_input);
@@ -1151,9 +1122,9 @@ struct Parser {
 	{
 		const tok = ref_input.front;
 		switch (tok.kind) {
-		case TokenKind.lparen:
+		case tk!`(`:
 			assert(0);
-		case TokenKind.lbracket:
+		case tk!`[`:
 			assert(0);
 		default:
 			return null;
@@ -1167,27 +1138,27 @@ struct Parser {
 		string identifier;
 		type = parsePointer(input, type);
 		const tok = input.front;
-		if (tok.kind == TokenKind.lparen) {
+		if (tok.kind == tk!`(`) {
 			input.popFront;
 			paren_decl = input;
 			int nest = 1;
 			while (nest) {
 				switch (input.front.kind) {
-				case TokenKind.lparen:
+				case tk!`(`:
 					nest++;
 					break;
-				case TokenKind.rparen:
+				case tk!`)`:
 					nest--;
 					break;
-				case TokenKind.eof:
-				case TokenKind.semicolon:
+				case tk!`eof`:
+				case tk!`;`:
 					error(input.front.location, "expected ')'");
 					assert(0);
 				default:
 				}
 				input.popFront;
 			}
-		} else if (tok.kind == TokenKind.identifier) {
+		} else if (tok.kind == tk!`identifier`) {
 			identifier = input.front.spelling;
 			input.popFront;
 		} else {
@@ -1200,7 +1171,7 @@ struct Parser {
 
 		if (paren_decl) {
 			auto result = parseDeclarator(paren_decl, type);
-			if (paren_decl.front.kind != TokenKind.rparen) {
+			if (paren_decl.front.kind != tk!`)`) {
 				error(paren_decl.front.location,
 					"expected ')' after declarator, not '%s'",
 					paren_decl.front.spelling);
@@ -1233,14 +1204,14 @@ version(unittest)
 			.split
 			.merge
 			.tokenize
-			.chain(only(Token(TokenKind.eof)))
-			.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline)
+			.chain(only(Token(tk!`eof`)))
+			.filter!(t => t.kind != tk!`space` && t.kind != tk!`newline`)
 			.map!(t => t.ppTokenToToken)
 			.array;
 		auto result = mixin("Parser().parse" ~ what ~ "(tokens)");
 		assertEqual(
 			tokens.map!(t => t.kind),
-			chain(remainder, only(TokenKind.eof)));
+			chain(remainder, only(tk!`eof`)));
 		return result;
 	}
 }
@@ -1280,7 +1251,7 @@ unittest
 	crtest!("can nest postfix operators",
 		() {
 			auto e = expr("1[42]()(2, 3)->a.b++").as!UnaryExpression;
-			assert(e.unaryOp == UnaryOp.postIncrement);
+			assert(e.unaryOp == tk!`post++`);
 			auto e1 = e.operand.as!MemberExpression;
 			assert(e1.memberName == "b");
 			assert(!e1.pointer);
@@ -1301,19 +1272,19 @@ unittest
 	crtest!("binary operators are left-associative",
 		() {
 			auto e = expr("1 + 2 * 3 % 4 / 5 + 6").as!BinaryExpression;
-			assert(e.binaryOp == TokenKind.plus);
+			assert(e.binaryOp == tk!`+`);
 			assert(e.rhs.as!IntegerConstant.value == 6);
 			auto add = e.lhs.as!BinaryExpression;
-			assert(add.binaryOp == TokenKind.plus);
+			assert(add.binaryOp == tk!`+`);
 			assert(add.lhs.as!IntegerConstant.value == 1);
 			auto div = add.rhs.as!BinaryExpression;
-			assert(div.binaryOp == TokenKind.div);
+			assert(div.binaryOp == tk!`/`);
 			assert(div.rhs.as!IntegerConstant.value == 5);
 			auto rem = div.lhs.as!BinaryExpression;
-			assert(rem.binaryOp == TokenKind.mod);
+			assert(rem.binaryOp == tk!`%`);
 			assert(rem.rhs.as!IntegerConstant.value == 4);
 			auto mul = rem.lhs.as!BinaryExpression;
-			assert(mul.binaryOp == TokenKind.mul);
+			assert(mul.binaryOp == tk!`*`);
 			assert(mul.rhs.as!IntegerConstant.value == 3);
 			assert(mul.lhs.as!IntegerConstant.value == 2);
 		});
@@ -1322,11 +1293,11 @@ unittest
 		() {
 			auto c = expr("(int)--*&1").as!CastExpression;
 			auto mm = c.operand.as!UnaryExpression;
-			assert(mm.unaryOp == UnaryOp.preDecrement);
+			assert(mm.unaryOp == tk!`--`);
 			auto ind = mm.operand.as!UnaryExpression;
-			assert(ind.unaryOp == UnaryOp.indirection);
+			assert(ind.unaryOp == tk!`*`);
 			auto ad = ind.operand.as!UnaryExpression;
-			assert(ad.unaryOp == UnaryOp.address);
+			assert(ad.unaryOp == tk!`&`);
 			assert(ad.operand.as!IntegerConstant.value == 1);
 		});
 
@@ -1342,15 +1313,15 @@ unittest
 		() {
 			auto e = expr("1 || 2 ? 3 || 4 : 5 || 6").as!ConditionalExpression;
 			auto ce = e.condition.as!BinaryExpression;
-			assert(ce.binaryOp == TokenKind.oror);
+			assert(ce.binaryOp == tk!`||`);
 			assert(ce.lhs.as!IntegerConstant.value == 1);
 			assert(ce.rhs.as!IntegerConstant.value == 2);
 			auto te = e.trueExpression.as!BinaryExpression;
-			assert(te.binaryOp == TokenKind.oror);
+			assert(te.binaryOp == tk!`||`);
 			assert(te.lhs.as!IntegerConstant.value == 3);
 			assert(te.rhs.as!IntegerConstant.value == 4);
 			auto fe = e.falseExpression.as!BinaryExpression;
-			assert(fe.binaryOp == TokenKind.oror);
+			assert(fe.binaryOp == tk!`||`);
 			assert(fe.lhs.as!IntegerConstant.value == 5);
 			assert(fe.rhs.as!IntegerConstant.value == 6);
 		});
@@ -1374,7 +1345,7 @@ unittest
 {
 	crtest!("enum without enumerator list",
 		() {
-			auto e = parse!"EnumSpecifier"(`enum foo;`, TokenKind.semicolon).as!EnumDeclaration;
+			auto e = parse!"EnumSpecifier"(`enum foo;`, tk!`;`).as!EnumDeclaration;
 			assert(e.tag == "foo");
 			assert(e.list.length == 0);
 		});
@@ -1382,7 +1353,7 @@ unittest
 	crtest!("enum with one constant with default value",
 		() {
 			foreach (src; [`enum foo { bar };`, `enum foo { bar, };`]) {
-				auto e = parse!"EnumSpecifier"(src, TokenKind.semicolon)
+				auto e = parse!"EnumSpecifier"(src, tk!`;`)
 					.as!EnumDeclaration;
 				assert(e.tag == "foo");
 				assert(e.list.length == 1);
@@ -1396,7 +1367,7 @@ unittest
 			auto e =
 				parse!"EnumSpecifier"(
 					`enum foo { bar, baz = 13, quux = 42, };`,
-					TokenKind.semicolon)
+					tk!`;`)
 				.as!EnumDeclaration;
 			assert(e.tag == "foo");
 			assert(e.list.length == 3);
@@ -1433,14 +1404,14 @@ unittest
 	crtest!("parse type qualifiers",
 		() {
 			auto tq = parse!"Specifiers!(Parser.SpecifierSet.typeQualifierList)"(
-				"const volatile restrict int", TokenKind.int_);
+				"const volatile restrict int", tk!`int`);
 			assert(tq.const_);
 			assert(tq.volatile_);
 			assert(!tq._Atomic_);
 			assert(tq.restrict_);
 
 			tq = parse!"Specifiers!(Parser.SpecifierSet.typeQualifierList)"(
-				"_Atomic restrict typedef", TokenKind.typedef_);
+				"_Atomic restrict typedef", tk!`typedef`);
 			assert(!tq.const_);
 			assert(!tq.volatile_);
 			assert(tq._Atomic_);
@@ -1451,7 +1422,7 @@ unittest
 		() {
 			auto sq = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
 				"extern _Thread_local unsigned _Alignas(16) const _Alignas(int) *",
-				TokenKind.mul);
+				tk!`*`);
 			assert(sq.extern_);
 			assert(sq._Thread_local_);
 			assert(sq._Alignas_);
@@ -1511,7 +1482,7 @@ unittest
 	crtest!("void combines with typedef",
 		() {
 			auto ds = parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(
-				"void typedef *", TokenKind.mul);
+				"void typedef *", tk!`*`);
 			assert(ds.void_);
 			assert(ds.typedef_);
 		});

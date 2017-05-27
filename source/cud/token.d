@@ -27,129 +27,69 @@ struct Line
 
 private enum maxMacroParams = 65536;
 
-///
-enum TokenKind : int
-{
-	reserved,
-
+enum TokenKind : int {
 	eof,
-	space,
-	newline,
+}
 
-	lbracket,
-	rbracket,
-	lparen,
-	rparen,
-	lcurly,
-	rcurly,
-	dot,
-	ptr,
+template Tokens()
+{
+	import std.string : split;
+	import std.algorithm : countUntil;
 
-	plusplus,
-	minusminus,
-	and,
-	mul,
-	plus,
-	minus,
-	tilde,
-	not,
+	enum punctuators =
+		(`[ ] ( ) { } >>= >> >= > <<= << <= < ` ~
+		`&& &= & || |= | ^= ^ *= * ++ += + -- -= -> - == = != ! /= / ` ~
+		`%= % : ... . ~ ## # ; , ?`).split;
 
-	div,
-	mod,
-	shl,
-	shr,
-	lt,
-	gt,
-	le,
-	ge,
-	equal,
-	notequal,
-	xor,
-	or,
-	andand,
-	oror,
+	enum alternative = `<: :> <% %> %: %:%:`.split;
+	enum equivalents = `[  ]  {  }  #  ##`.split;
 
-	question,
-	colon,
-	semicolon,
-	ellipsis,
+	enum keywords =
+		(`auto break case char const continue default do double else enum ` ~
+		`extern float for goto if inline int long register restrict return ` ~
+		`short signed sizeof static struct switch typedef union unsigned ` ~
+		`void volatile while _Alignas _Alignof _Atomic _Bool _Complex ` ~
+		`_Generic _Imaginary _Noreturn _Static_assert _Thread_local`).split;
 
-	assign,
-	mulassign,
-	divassign,
-	modassign,
-	plusassign,
-	minusassign,
-	shlassign,
-	shrassign,
-	andassign,
-	xorassign,
-	orassign,
+	enum dynamicTokens =
+		(`space newline intconst uintconst longconst ` ~
+		`ulongconst headername identifier ppnumber charconst ` ~
+		`stringliteral notreplacedidentifier placemarker ` ~
+		`post++ post-- macroparam`).split;
 
-	comma,
+	enum allTokens = [`eof`, ``] ~ punctuators ~ keywords ~ dynamicTokens;
 
-	intconstant,
-	uintconstant,
-	longconstant,
-	ulongconstant,
+	template tk(string s)
+	{
+		enum i = allTokens.countUntil(s);
+		static if (i >= 0)
+			enum tk = cast(TokenKind) i;
+		else {
+			enum j = alternative.countUntil(s);
+			static if (j >= 0)
+				enum tk = .Tokens!().tk!(equivalents[j]);
+			else
+				static assert(0, "Invalid token kind: " ~ s);
+		}
+	}
+}
 
-	auto_,
-	break_,
-	case_,
-	char_,
-	const_,
-	continue_,
-	default_,
-	do_,
-	double_,
-	else_,
-	enum_,
-	extern_,
-	float_,
-	for_,
-	goto_,
-	if_,
-	inline_,
-	int_,
-	long_,
-	register_,
-	restrict_,
-	return_,
-	short_,
-	signed_,
-	sizeof_,
-	static_,
-	struct_,
-	switch_,
-	typedef_,
-	union_,
-	unsigned_,
-	void_,
-	volatile_,
-	while_,
-	_Alignas_,
-	_Alignof_,
-	_Atomic_,
-	_Bool_,
-	_Complex_,
-	_Generic_,
-	_Imaginary_,
-	_Noreturn_,
-	_Static_assert_,
-	_Thread_local_,
+alias allTokens = Tokens!().allTokens;
+alias tk = Tokens!().tk;
 
-	hash,
-	hashhash,
+template tks(string s)
+{
+	import std.string : split;
+	import std.meta : aliasSeqOf, staticMap;
+	alias tks = staticMap!(tk, aliasSeqOf!(s.split));
+}
 
-	headername,
-	identifier,
-	ppnumber,
-	charconstant,
-	stringliteral,
-
-	notreplacedidentifier,
-	placemarker,
-	macroparam,
+unittest
+{
+	static assert(tk!`<%` == tk!`{`);
+	static assert(tk!`:>` == tk!`]`);
+	static assert(tk!`%:%:` == tk!`##`);
+	static assert(tks!`<% :>` == tks!`{ ]`);
 }
 
 ///
@@ -169,7 +109,7 @@ struct Location
 /// Represents a token or preprocessing token (pp-token)
 struct Token
 {
-	TokenKind kind = TokenKind.reserved; ///
+	TokenKind kind = tk!``;
 	Location location; ///
 	string spelling; ///
 	union {
@@ -179,21 +119,19 @@ struct Token
 
 	static Token makeConstant(T)(T value, Location loc, string spelling)
 	{
-		with(TokenKind) {
-			import std.meta : AliasSeq, staticIndexOf;
-			import std.traits : isSigned, isUnsigned;
-			alias Types = AliasSeq!(int, uint, long, ulong);
-			enum kinds = [intconstant, uintconstant, longconstant, ulongconstant];
-			enum kind = kinds[staticIndexOf!(T, Types)];
-			auto result = Token(kind, loc, spelling);
-			static if (isSigned!T)
-				result.signedInt64Value = value;
-			else static if (isUnsigned!T)
-				result.unsignedInt64Value = value;
-			else
-				static assert(0);
-			return result;
-		}
+		import std.meta : AliasSeq, staticIndexOf;
+		import std.traits : isSigned, isUnsigned;
+		alias Types = AliasSeq!(int, uint, long, ulong);
+		enum kinds = [tk!`intconst`, tk!`uintconst`, tk!`longconst`, tk!`ulongconst`];
+		enum kind = kinds[staticIndexOf!(T, Types)];
+		auto result = Token(kind, loc, spelling);
+		static if (isSigned!T)
+			result.signedInt64Value = value;
+		else static if (isUnsigned!T)
+			result.unsignedInt64Value = value;
+		else
+			static assert(0);
+		return result;
 	}
 
 	void toString(scope void delegate(const(char)[]) dg) const
@@ -208,7 +146,7 @@ struct Token
 	bool opCast(T)() const pure nothrow @safe
 		if (is(T == bool))
 	{
-		return kind != TokenKind.reserved;
+		return kind != tk!``;
 	}
 
 	///
@@ -217,7 +155,7 @@ struct Token
 		crtest!("opCast!bool is true for Token.init",
 			() {
 				assert(!Token.init);
-				assert(!!Token(TokenKind.plus));
+				assert(!!Token(tk!`+`));
 			});
 	}
 
@@ -226,19 +164,19 @@ struct Token
 		import std.exception : enforce;
 		enforce(index >= 0 && index < maxMacroParams);
 		return Token(
-			cast(TokenKind) (TokenKind.macroparam + index),
+			cast(TokenKind) (tk!`macroparam` + index),
 			this.location, this.spelling);
 	}
 
 	@property bool isMacroParam() const pure nothrow @safe
 	{
-		return kind >= TokenKind.macroparam && kind < (TokenKind.macroparam + maxMacroParams);
+		return kind >= tk!`macroparam` && kind < (tk!`macroparam` + maxMacroParams);
 	}
 
 	@property int macroParamIndex() const pure nothrow @safe
 	{
 		assert(this.isMacroParam);
-		return kind - TokenKind.macroparam;
+		return kind - tk!`macroparam`;
 	}
 
 	bool opEquals(Token rhs) const pure @safe nothrow
@@ -275,25 +213,25 @@ package Token popSpaces(R)(ref R tr) pure nothrow
 {
 	while (!tr.empty) {
 		immutable tok = tr.front;
-		if (tok.kind != TokenKind.space)
+		if (tok.kind != tk!`space`)
 			return tok;
 		tr.popFront;
 	}
 	return Token.init;
 }
 
-
 /**
 Returns: the first token of matched sequence, or a null array if
 the `input` sequence does not match the expected `token_kinds`.
 */
-package Token match(bool expect = false)(ref const(Token)[] input, TokenKind[] token_kinds...) pure @safe
+package Token match(bool expect = false)(
+	ref const(Token)[] input, TokenKind[] token_kinds...) pure @safe
 {
 	const(Token)[] tr = input;
 	Token result;
 	foreach (i, kind; token_kinds) {
-		assert(kind != TokenKind.eof);
-		assert(kind != TokenKind.space);
+		assert(kind != tk!`eof`);
+		assert(kind != tk!`space`);
 		const tok = tr.popSpaces;
 		if (tok.kind != kind) {
 			static if (expect)
@@ -317,27 +255,30 @@ package Token expect(ref const(Token)[] input, TokenKind[] token_kinds...) pure 
 unittest
 {
 	import cud.test;
-	import std.algorithm : map, equal;
+	import std.algorithm : map;
 	import std.range : array;
 
-	with(TokenKind) {
-		crtest!("match() returns first token of matched sequence",
-			() {
-				auto toks = [ space, space, plus, space, identifier ]
-					.map!(k => const(Token)(k)).array;
-				assert(toks.match(plus, identifier).kind == plus);
-				assert(toks.empty);
-			});
+	crtest!("match() returns first token of matched sequence",
+		() {
+			auto toks = [ tk!`space`, tk!`space`, tk!`+`, tk!`space`,
+				tk!`identifier` ].map!(k => const(Token)(k)).array;
+			assert(toks.match(tk!`+`, tk!`identifier`).kind == tk!`+`);
+			assert(toks.empty);
+		});
 
-		crtest!("match() does not accept partial matches: returns null token and does not advance input",
-			() {
-				auto toks = [ space, space, plus, space, identifier, newline ]
-					.map!(k => const(Token)(k)).array;
-				assert(!toks.match(plus, plus));
-				assert(toks.map!(t => t.kind).equal([space, space, plus, space, identifier, newline]));
-			});
-
-	}
+	crtest!("match() does not accept partial matches: returns null token and does not advance input",
+		() {
+			auto toks = [ tk!`space`, tk!`space`, tk!`+`, tk!`space`,
+				tk!`identifier`, tk!`newline` ]
+				.map!(k => const(Token)(k)).array;
+			assert(!toks.match(tk!`+`, tk!`+`));
+			assertEqual(
+				toks.map!(t => t.kind),
+				[
+					tk!`space`, tk!`space`, tk!`+`, tk!`space`,
+					tk!`identifier`, tk!`newline`
+				]);
+		});
 }
 
 Token parseNumber(Token tok) pure @safe
@@ -414,15 +355,14 @@ Token parseNumber(Token tok) pure @safe
 
 Token ppTokenToToken(Token tok) pure @safe
 {
-	switch (tok.kind) with(TokenKind) {
-	case ppnumber:
+	import std.meta : aliasSeqOf;
+	switch (tok.kind) {
+	case tk!`ppnumber`:
 		return parseNumber(tok);
-	case identifier:
-		foreach (tk; __traits(allMembers, TokenKind)) {
-			static if (tk[$ - 1] == '_') {
-				if (tok.spelling == tk[0 .. $ - 1])
-					return Token(mixin(tk), tok.location, tok.spelling);
-			}
+	case tk!`identifier`:
+		foreach (kw; aliasSeqOf!(Tokens!().keywords)) {
+			if (tok.spelling == kw)
+				return Token(tk!kw, tok.location, tok.spelling);
 		}
 		goto default;
 	default:
@@ -436,41 +376,39 @@ unittest
 
 	static auto ppnum(string spelling)
 	{
-		return Token(TokenKind.ppnumber, Location.init, spelling).ppTokenToToken;
+		return Token(tk!`ppnumber`, Location.init, spelling).ppTokenToToken;
 	}
 
 	static auto testppnum(T)(string spelling, TokenKind kind, T value)
 	{
 		auto token = ppnum(spelling);
 		assert(token.kind == kind);
-		if (kind == TokenKind.intconstant || kind == TokenKind.longconstant)
+		if (kind == tk!`intconst` || kind == tk!`longconst`)
 			assert(token.signedInt64Value == value);
-		else if (kind == TokenKind.uintconstant || kind == TokenKind.ulongconstant)
+		else if (kind == tk!`uintconst` || kind == tk!`ulongconst`)
 			assert(token.unsignedInt64Value == value);
 	}
 
 	crtest!("convert pp tokens to integer constants",
 		() {
-			with(TokenKind) {
-				testppnum("0", intconstant, 0);
-				testppnum("2", intconstant, 2);
-				testppnum("00017", intconstant, octal!17);
-				testppnum("0l", longconstant, 0);
-				testppnum("0ll", longconstant, 0);
-				testppnum("0x123", intconstant, 0x123);
-				testppnum("0x89aBcDef", uintconstant, 0x89abcdef);
-				testppnum("0x123u", uintconstant, 0x123);
-				testppnum("123", intconstant, 123);
-				testppnum("123u", uintconstant, 123);
-				testppnum("2147483653", longconstant, 0x80000005);
-				testppnum("2147483653U", uintconstant, 0x80000005);
-				testppnum("2147483653uL", ulongconstant, 0x80000005);
-				testppnum("4294967301", longconstant, 0x100000005);
-				testppnum("4294967301u", ulongconstant, 0x100000005);
-				testppnum("0xffffffffffffffff", ulongconstant, 0xffffffffffffffff);
-				testppnum("0xffffffffffffffffll", ulongconstant, 0xffffffffffffffff);
-				testppnum("0xffffffffffffffffU", ulongconstant, 0xffffffffffffffff);
-			}
+			testppnum("0", tk!`intconst`, 0);
+			testppnum("2", tk!`intconst`, 2);
+			testppnum("00017", tk!`intconst`, octal!17);
+			testppnum("0l", tk!`longconst`, 0);
+			testppnum("0ll", tk!`longconst`, 0);
+			testppnum("0x123", tk!`intconst`, 0x123);
+			testppnum("0x89aBcDef", tk!`uintconst`, 0x89abcdef);
+			testppnum("0x123u", tk!`uintconst`, 0x123);
+			testppnum("123", tk!`intconst`, 123);
+			testppnum("123u", tk!`uintconst`, 123);
+			testppnum("2147483653", tk!`longconst`, 0x80000005);
+			testppnum("2147483653U", tk!`uintconst`, 0x80000005);
+			testppnum("2147483653uL", tk!`ulongconst`, 0x80000005);
+			testppnum("4294967301", tk!`longconst`, 0x100000005);
+			testppnum("4294967301u", tk!`ulongconst`, 0x100000005);
+			testppnum("0xffffffffffffffff", tk!`ulongconst`, 0xffffffffffffffff);
+			testppnum("0xffffffffffffffffll", tk!`ulongconst`, 0xffffffffffffffff);
+			testppnum("0xffffffffffffffffU", tk!`ulongconst`, 0xffffffffffffffff);
 		});
 
 	crtest!("error on too large integer constant",
@@ -487,14 +425,12 @@ unittest
 
 unittest
 {
-	with (TokenKind) {
+	assertEqual(
 		[
-			Token(identifier, Location.init, "auto"),
-			Token(identifier, Location.init, "if"),
-			Token(identifier, Location.init, "static"),
-			Token(identifier, Location.init, "_Thread_local"),
-		]
-			.map!(t => t.ppTokenToToken.kind)
-			.assertEqual([auto_, if_, static_, _Thread_local_]);
-	}
+			Token(tk!`identifier`, Location.init, "auto"),
+			Token(tk!`identifier`, Location.init, "if"),
+			Token(tk!`identifier`, Location.init, "static"),
+			Token(tk!`identifier`, Location.init, "_Thread_local"),
+		].map!(t => t.ppTokenToToken.kind),
+		[ tks!`auto if static _Thread_local` ]);
 }

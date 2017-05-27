@@ -119,24 +119,24 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		m_fs = fs;
 		m_input = readFile(file_name);
 		static if (keepSpaces)
-			m_output ~= Token(TokenKind.space);
+			m_output ~= Token(tk!`space`);
 	}
 
 	Token[] preprocess()
 	{
 		while (!m_input.empty) {
-			while (m_input.match(TokenKind.hash))
+			while (m_input.match(tk!`#`))
 				directive(m_input);
 			while (!m_input.empty) {
 				const tok = m_input.front;
 				m_input.popFront;
-				if (tok.kind == TokenKind.newline) {
-					put(Token(TokenKind.space, tok.location, ""));
+				if (tok.kind == tk!`newline`) {
+					put(Token(tk!`space`, tok.location, ""));
 					break;
-				} else if (tok.kind != TokenKind.identifier) {
-					if (tok.kind == TokenKind.notreplacedidentifier)
-						put(Token(TokenKind.identifier, tok.location, tok.spelling));
-					else if (tok.kind != TokenKind.placemarker)
+				} else if (tok.kind != tk!`identifier`) {
+					if (tok.kind == tk!`notreplacedidentifier`)
+						put(Token(tk!`identifier`, tok.location, tok.spelling));
+					else if (tok.kind != tk!`placemarker`)
 						put(tok);
 				} else if (auto pm = tok.spelling in m_macros) {
 					if (!replaceMacro(*pm, tok, m_input))
@@ -147,7 +147,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 			}
 		}
 		put(Token(
-			TokenKind.eof,
+			tk!`eof`,
 			m_output.length
 				? Location(m_output[$ - 1].location.file, m_output[$ - 1].location.line + 1, 0)
 				: Location.init));
@@ -158,11 +158,11 @@ struct Preprocessor(FS, bool keepSpaces = false)
 	private void put(in Token tok) pure
 	{
 		static if (!keepSpaces) {
-			if (tok.kind == TokenKind.space || tok.kind == TokenKind.newline)
+			if (tok.kind == tk!`space` || tok.kind == tk!`newline`)
 				return;
 		} else {
-			if (tok.kind == TokenKind.space
-			 && m_output[$ - 1].kind == TokenKind.space)
+			if (tok.kind == tk!`space`
+			 && m_output[$ - 1].kind == tk!`space`)
 			return;
 		}
 		m_output ~= tok;
@@ -170,7 +170,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 
 	private uint[string] parseMacroParams(ref const(Token)[] input) pure @safe
 	{
-		if (input.empty || input.front.kind != TokenKind.lparen)
+	if (input.empty || input.front.kind != tk!`(`)
 			return null;
 
 		input.popFront;
@@ -180,22 +180,22 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		params.remove("");
 		assert(params !is null);
 
-		if (input.popSpaces.kind == TokenKind.rparen) {
+		if (input.popSpaces.kind == tk!`)`) {
 			input.popFront;
 			return params;
 		}
 
 		for (;;) {
-			if (immutable tok = input.match(TokenKind.identifier)) {
+			if (immutable tok = input.match(tk!`identifier`)) {
 				if (tok.spelling in params)
 					error(tok, "duplicate macro parameter '%s'",
 						tok.spelling);
 				params[tok.spelling] = index++;
-				if (input.match(TokenKind.rparen))
+				if (input.match(tk!`)`))
 					break;
-				input.expect(TokenKind.comma);
+				input.expect(tk!`,`);
 			} else {
-				input.expect(TokenKind.ellipsis, TokenKind.rparen);
+				input.expect(tk!`...`, tk!`)`);
 				params["__VA_ARGS__"] = index;
 				break;
 			}
@@ -212,27 +212,27 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		while (!input.empty) {
 			Token rep_token = input.front;
 			input.popFront;
-			if (rep_token.kind == TokenKind.newline)
+			if (rep_token.kind == tk!`newline`)
 				break;
-			if (rep_token.kind == TokenKind.space) {
+			if (rep_token.kind == tk!`space`) {
 				if (!(replacement.length
-					&& (replacement[$ - 1].kind == TokenKind.hash
-					 || replacement[$ - 1].kind == TokenKind.hashhash)))
+					&& (replacement[$ - 1].kind == tk!`#`
+					 || replacement[$ - 1].kind == tk!`##`)))
 				{
-					replacement ~= Token(TokenKind.space, rep_token.location, " ");
+					replacement ~= Token(tk!`space`, rep_token.location, " ");
 				}
 				rep_token = input.popSpaces;
 				input.popFront;
 			}
 			switch (rep_token.kind) {
-				case TokenKind.identifier:
+				case tk!`identifier`:
 					if (auto pident = rep_token.spelling in params) {
 						replacement ~= rep_token.toMacroParam(*pident);
 						break;
 					} else
 						goto default;
-				case TokenKind.hashhash:
-					while (replacement.length && replacement[$ - 1].kind == TokenKind.space)
+				case tk!`##`:
+					while (replacement.length && replacement[$ - 1].kind == tk!`space`)
 						replacement = replacement[0 .. $ - 1];
 					if (replacement.length == 0)
 						error(rep_token, "'##' cannot appear at start of a macro replacement list");
@@ -240,7 +240,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				default:
 					if (is_function_like
 						&& replacement.length
-						&& replacement[$ - 1].kind == TokenKind.hash)
+						&& replacement[$ - 1].kind == tk!`#`)
 					{
 						error(replacement[$ - 1], "'#' is not followed by a macro parameter");
 					}
@@ -249,9 +249,9 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		}
 		if (replacement.length) {
 			const last = replacement[$ - 1];
-			if (is_function_like && last.kind == TokenKind.hash)
+			if (is_function_like && last.kind == tk!`#`)
 				error(last, "'#' is not followed by a macro parameter");
-			if (last.kind == TokenKind.hashhash)
+			if (last.kind == tk!`##`)
 				error(last, "'##' cannot appear at end of a macro replacement list");
 		}
 		return replacement;
@@ -259,7 +259,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 
 	private void defineMacro(ref const(Token)[] input) pure
 	{
-		immutable name_tok = input.expect(TokenKind.identifier);
+		immutable name_tok = input.expect(tk!`identifier`);
 		immutable name = name_tok.spelling;
 		const params = parseMacroParams(input);
 		immutable is_function_like = params !is null;
@@ -282,13 +282,13 @@ struct Preprocessor(FS, bool keepSpaces = false)
 
 	private void undefMacro(ref const(Token)[] input) pure
 	{
-		auto name = input.expect(TokenKind.identifier, TokenKind.newline).spelling;
+		auto name = input.expect(tk!`identifier`, tk!`newline`).spelling;
 		m_macros.remove(name);
 	}
 
 	private void includeFile(ref const(Token)[] input) pure
 	{
-		auto name = input.expect(TokenKind.headername, TokenKind.newline).spelling;
+		auto name = input.expect(tk!`headername`, tk!`newline`).spelling;
 		assert(name.length >= 2);
 		name = name[1 .. $ - 1];
 		input = readFile(name) ~ input;
@@ -300,7 +300,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		while (!input.empty) {
 			const tok = input.front;
 			input.popFront;
-			if (tok.kind == TokenKind.newline)
+			if (tok.kind == tk!`newline`)
 				break;
 			message ~= input.front.spelling;
 		}
@@ -320,9 +320,9 @@ struct Preprocessor(FS, bool keepSpaces = false)
 	{
 		const tok = input.popSpaces;
 		input.popFront;
-		if (tok.kind == TokenKind.newline)
+		if (tok.kind == tk!`newline`)
 			return;
-		if (tok.kind == TokenKind.identifier) {
+		if (tok.kind == tk!`identifier`) {
 			switch (tok.spelling) {
 			case "include":
 				includeFile(input);
@@ -351,7 +351,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 			while (!input.empty) {
 				const discard = input.front;
 				input.popFront;
-				if (discard.kind == TokenKind.newline)
+				if (discard.kind == tk!`newline`)
 					break;
 			}
 		}
@@ -371,13 +371,13 @@ struct Preprocessor(FS, bool keepSpaces = false)
 			Token result;
 			while (!input.empty) {
 				const tok = input.front;
-				if (tok.kind != TokenKind.newline && tok.kind != TokenKind.space)
+				if (tok.kind != tk!`newline` && tok.kind != tk!`space`)
 					break;
 				if (!result)
-					result = Token(TokenKind.space, tok.location, " ");
+					result = Token(tk!`space`, tok.location, " ");
 				input.popFront;
-				if (tok.kind == TokenKind.newline) {
-					while (input.match(TokenKind.hash))
+				if (tok.kind == tk!`newline`) {
+					while (input.match(tk!`#`))
 						directive(input);
 				}
 			}
@@ -385,7 +385,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		}
 
 		popSpacesAcrossLines();
-		if (input.empty || input.front.kind != TokenKind.lparen)
+		if (input.empty || input.front.kind != tk!`(`)
 			return null;
 
 		immutable tok_lparen0 = input.front;
@@ -401,13 +401,13 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				error(tok_lparen0, "unterminated macro argument list");
 			immutable tok = input.front;
 			input.popFront;
-			if (tok.kind == TokenKind.lparen) {
+			if (tok.kind == tk!`(`) {
 				nest_level++;
-			} else if (tok.kind == TokenKind.rparen) {
+			} else if (tok.kind == tk!`)`) {
 				if (nest_level == 0)
 					break;
 				nest_level--;
-			} else if (tok.kind == TokenKind.comma
+			} else if (tok.kind == tk!`,`
 				&& nest_level == 0
 				&& current + 1 < args.length)
 			{
@@ -417,9 +417,9 @@ struct Preprocessor(FS, bool keepSpaces = false)
 			args[current] ~= tok;
 		}
 		foreach (ref arg; args) {
-			while (arg.length && arg[0].kind == TokenKind.space)
+			while (arg.length && arg[0].kind == tk!`space`)
 				arg = arg[1 .. $];
-			while (arg.length && arg[$ - 1].kind == TokenKind.space)
+			while (arg.length && arg[$ - 1].kind == tk!`space`)
 				arg = arg[0 .. $ - 1];
 		}
 		return args;
@@ -437,12 +437,12 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				while (!rep.empty) {
 					Token tok = rep.front;
 					rep.popFront;
-					if (tok.kind == TokenKind.hashhash) {
-						while (rep.front.kind == TokenKind.hashhash)
+					if (tok.kind == tk!`##`) {
+						while (rep.front.kind == tk!`##`)
 							rep.popFront;
 						assert(result.length > 0);
-						assert(result[$ - 1].kind != TokenKind.space);
-						assert(rep.front.kind != TokenKind.space);
+						assert(result[$ - 1].kind != tk!`space`);
+						assert(rep.front.kind != tk!`space`);
 						result[$ - 1] = pasteTokens(result[$ - 1], rep.front);
 						rep.popFront;
 					} else {
@@ -466,7 +466,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				{
 					const(Token)[] arg = args[mac_tok.macroParamIndex];
 					if (arg.empty)
-						return [Token(TokenKind.placemarker, mac_tok.location, "")];
+						return [Token(tk!`placemarker`, mac_tok.location, "")];
 					return arg;
 				}
 
@@ -478,7 +478,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 						while (!arg.empty) {
 							const tok = arg.front;
 							arg.popFront;
-							if (tok.kind != TokenKind.identifier)
+							if (tok.kind != tk!`identifier`)
 								rarg ~= tok;
 							else if (auto pm = tok.spelling in m_macros) {
 								if (!replaceMacro(*pm, tok, arg))
@@ -500,7 +500,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 						auto strapp = appender!string;
 						strapp.put('\"');
 						foreach (tok; arg) {
-							if (tok.kind == TokenKind.charconstant || tok.kind == TokenKind.stringliteral) {
+							if (tok.kind == tk!`charconst` || tok.kind == tk!`stringliteral`) {
 								foreach (char c; tok.spelling) {
 									if (c == '"' || c == '\\')
 										strapp.put('\\');
@@ -512,7 +512,7 @@ struct Preprocessor(FS, bool keepSpaces = false)
 						}
 						strapp.put('\"');
 						stringified_args[index] = Token(
-							TokenKind.stringliteral,
+							tk!`stringliteral`,
 							arg.length ? arg[0].location : macro_ref.location,
 							strapp.data);
 					}
@@ -523,18 +523,18 @@ struct Preprocessor(FS, bool keepSpaces = false)
 				while (!rep.empty) {
 					Token tok = rep.front;
 					rep.popFront;
-					if (tok.kind == TokenKind.hash) {
+					if (tok.kind == tk!`#`) {
 						assert(!rep.empty && rep.front.isMacroParam);
 						result ~= cachedStringifiedArg(rep.front.macroParamIndex);
 						rep.popFront;
 					} else if (tok.isMacroParam) {
-						if (!rep.empty && rep.front.kind == TokenKind.hashhash)
+						if (!rep.empty && rep.front.kind == tk!`##`)
 							result ~= argOrPlacemarker(tok);
 						else
 							result ~= cachedReplacedArg(tok.macroParamIndex);
-					} else if (tok.kind == TokenKind.hashhash) {
+					} else if (tok.kind == tk!`##`) {
 						assert(!rep.empty);
-						while (rep.front.kind == TokenKind.hashhash)
+						while (rep.front.kind == tk!`##`)
 							rep.popFront;
 						assert(!rep.empty);
 						Token rhstok = rep.front;
@@ -553,8 +553,8 @@ struct Preprocessor(FS, bool keepSpaces = false)
 			}
 		});
 		foreach (i, ref tok; result) {
-			if (tok.kind == TokenKind.identifier && tok.spelling == m.name)
-				tok.kind = TokenKind.notreplacedidentifier;
+			if (tok.kind == tk!`identifier` && tok.spelling == m.name)
+				tok.kind = tk!`notreplacedidentifier`;
 		}
 		if (insert)
 			input = result ~ input;
@@ -567,17 +567,17 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		while (!tokens.empty) {
 			const tok = tokens.popSpaces;
 			tokens.popFront;
-			if (tok.kind == TokenKind.newline)
+			if (tok.kind == tk!`newline`)
 				break;
-			if (tok.kind == TokenKind.identifier) {
+			if (tok.kind == tk!`identifier`) {
 				if (tok.spelling == "defined") {
 					// 6.10.1, Constraint 1
-					bool paren = !!tokens.match(TokenKind.lparen);
-					const name = tokens.expect(TokenKind.identifier).spelling;
+					bool paren = !!tokens.match(tk!`(`);
+					const name = tokens.expect(tk!`identifier`).spelling;
 					if (paren)
-						tokens.expect(TokenKind.rparen);
+						tokens.expect(tk!`)`);
 					expr_tokens ~= Token(
-						TokenKind.ppnumber, tok.location,
+						tk!`ppnumber`, tok.location,
 						name in m_macros ? "1" : "0");
 					continue;
 				} else if (auto pm = tok.spelling in m_macros) {
@@ -585,8 +585,8 @@ struct Preprocessor(FS, bool keepSpaces = false)
 					if (replaceMacro(*pm, tok, tokens))
 						continue;
 				}
-				expr_tokens ~= Token(TokenKind.ppnumber, tok.location, "0");
-			} else if (tok.kind == TokenKind.stringliteral) {
+				expr_tokens ~= Token(tk!`ppnumber`, tok.location, "0");
+			} else if (tok.kind == tk!`stringliteral`) {
 				error(tok, "string literals are not valid tokens in preprocessor expressions");
 			} else {
 				expr_tokens ~= tok;
@@ -615,48 +615,48 @@ struct Preprocessor(FS, bool keepSpaces = false)
 		while (!tokens.empty) {
 			const tok = tokens.front;
 			tokens.popFront;
-			if (tok.kind == TokenKind.newline) {
+			if (tok.kind == tk!`newline`) {
 				app.put(color_space);
 				app.put("↵");
 				app.put(color_reset);
-			} else if (tok.kind == TokenKind.space) {
+			} else if (tok.kind == tk!`space`) {
 				app.put(color_space);
 				app.put(" ");
 				app.put(color_reset);
-			} else if (tok.kind == TokenKind.placemarker) {
+			} else if (tok.kind == tk!`placemarker`) {
 				app.put(color_space);
 				app.put('¿');
 				app.put(color_reset);
 			} else {
-				switch (tok.kind) with (TokenKind) {
-					case notreplacedidentifier:
-						if (tok.spelling in m_macros)
-							app.put("\x1b[32;45;1m");
-						else
-							app.put("\x1b[34;45;1m");
-						break;
-					case identifier:
-						if (tok.spelling in m_macros)
-							app.put(color_macro);
-						else
-							app.put(color_identifier);
-						break;
-					case hash:
-						app.put(color_hash);
-						break;
-					case hashhash:
-						app.put(color_hashhash);
-						break;
-					case charconstant:
-					case stringliteral:
-					case ppnumber:
-						app.put(color_literal);
-						break;
-					default:
-						if (tok.isMacroParam)
-							app.put(color_param);
-						else
-							app.put(color_other);
+				switch (tok.kind) {
+				case tk!`notreplacedidentifier`:
+					if (tok.spelling in m_macros)
+						app.put("\x1b[32;45;1m");
+					else
+						app.put("\x1b[34;45;1m");
+					break;
+				case tk!`identifier`:
+					if (tok.spelling in m_macros)
+						app.put(color_macro);
+					else
+						app.put(color_identifier);
+					break;
+				case tk!`#`:
+					app.put(color_hash);
+					break;
+				case tk!`##`:
+					app.put(color_hashhash);
+					break;
+				case tk!`charconst`:
+				case tk!`stringliteral`:
+				case tk!`ppnumber`:
+					app.put(color_literal);
+					break;
+				default:
+					if (tok.isMacroParam)
+						app.put(color_param);
+					else
+						app.put(color_other);
 				}
 				app.put(tok.spelling);
 				app.put(color_reset);
@@ -709,12 +709,12 @@ version(unittest) {
 		auto pp = Preprocessor!FS(fs, file_name);
 		auto result = pp.preprocess().array;
 		scope(failure) if (!__ctfe) { debug writeln(" ACT: ", pp.format(result)); }
-		auto expected_tokens = expected.split.merge.tokenize.array ~ Token(TokenKind.eof);
+		auto expected_tokens = expected.split.merge.tokenize.array ~ Token(tk!`eof`);
 		scope(failure) if (!__ctfe) { debug writeln(" EXP: ", pp.format(expected_tokens)); }
 		assertEqual(
-			result.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline),
+			result.filter!(t => t.kind != tk!`space` && t.kind != tk!`newline`),
 			expected_tokens
-				.filter!(t => t.kind != TokenKind.space && t.kind != TokenKind.newline));
+				.filter!(t => t.kind != tk!`space` && t.kind != tk!`newline`));
 		return pp;
 	}
 
@@ -851,10 +851,10 @@ unittest // defineMacro
 				.macros["FOO"].as!FunctionLikeMacro)
 			{
 				assert(mac.replacement.length == 4);
-				assert(mac.replacement[0].kind == TokenKind.hash);
+				assert(mac.replacement[0].kind == tk!`#`);
 				assert(mac.replacement[1].isMacroParam);
 				assert(mac.replacement[1].macroParamIndex == 1);
-				assert(mac.replacement[2].kind == TokenKind.hash);
+				assert(mac.replacement[2].kind == tk!`#`);
 				assert(mac.replacement[3].isMacroParam);
 				assert(mac.replacement[3].macroParamIndex == 0);
 			}

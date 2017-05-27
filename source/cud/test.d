@@ -38,6 +38,17 @@ void crtest(string description, alias fun)()
 	crtest!("can use crtest in @safe pure unittest blocks", (){});
 }
 
+private auto prettify(T)(T a)
+{
+	import cud.token : TokenKind;
+	static if (is(T : const(TokenKind))) {
+		import cud.token : allTokens;
+		return allTokens[a];
+	} else {
+		return a;
+	}
+}
+
 void assertEqual(R1, R2)(R1 actual, R2 expected)
 	if (isInputRange!R1 && isInputRange!R2 && is(typeof(actual.front == expected.front ? 1 : 0)))
 {
@@ -49,7 +60,7 @@ void assertEqual(R1, R2)(R1 actual, R2 expected)
 		auto ef = expected.front;
 		if (af != ef) {
 			throw new AssertError(format("Ranges differ at %d: Actual=%s, Expected=%s",
-					n, af, ef));
+					n, prettify(af), prettify(ef)));
 		}
 		n++;
 		actual.popFront;
