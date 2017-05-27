@@ -686,66 +686,6 @@ struct Parser {
 	ConstantExpression <- ConditionalExpression
 	+/
 
-	static Type specifiersToType(S)(ref S spec, bool implicit_int = false)
-	{
-		if (spec.long_long_) {
-			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.slonglong_);
-			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulonglong_);
-			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.longlong_);
-		} else if (spec.long_) {
-			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.slong_);
-			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
-			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.long_);
-		} else if (spec.short_) {
-			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.sshort_);
-			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ushort_);
-			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
-		} else {
-			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.sint_);
-			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.uint_);
-			else if (spec.int_ || implicit_int)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.int_);
-		}
-		return null;
-
-	}
-
-	/+
-	type-name:
-		specifier-qualifier-list abstract-declarator?
-
-	abstract-declarator:
-		pointer
-		pointer? direct-abstract-declarator
-
-	direct-abstract-declarator:
-		( abstract-declarator )
-		direct-abstract-declarator? [ type-qualifier-list? assignment-expression? ]
-		direct-abstract-declarator? [ static type-qualifier-list? assignment-expression ]
-		direct-abstract-declarator? [ type-qualifier-list static assignment-expression ]
-		direct-abstract-declarator? [ * ]
-		direct-abstract-declarator? ( parameter-type-list opt )
-	+/
-	Type parseTypeName(ref const(Token)[] ref_input)
-	{
-		const(Token)[] input = ref_input;
-		auto specifiers = parseSpecifiers!(SpecifierSet.specifierQualifierList)(input);
-
-		ref_input = input;
-		return specifiersToType(specifiers);
-	}
-
 	Expression parseExpression(ref const(Token)[] input)
 	{
 		return parseConditionalExpression(input);
@@ -1094,6 +1034,41 @@ struct Parser {
 		}
 	}
 
+	static Type specifiersToType(S)(ref S spec, bool implicit_int = false)
+	{
+		if (spec.long_long_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.slonglong_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulonglong_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.longlong_);
+		} else if (spec.long_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.slong_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.long_);
+		} else if (spec.short_) {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.sshort_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ushort_);
+			else
+				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+		} else {
+			if (spec.signed_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.sint_);
+			else if (spec.unsigned_)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.uint_);
+			else if (spec.int_ || implicit_int)
+				return new BaseBuiltinType(BaseBuiltinType.Kind.int_);
+		}
+		return null;
+
+	}
+
 	static struct Declarator
 	{
 		Type type;
@@ -1185,7 +1160,30 @@ struct Parser {
 		return Declarator(type, identifier);
 	}
 
+	/+
+	type-name:
+		specifier-qualifier-list abstract-declarator?
 
+	abstract-declarator:
+		pointer
+		pointer? direct-abstract-declarator
+
+	direct-abstract-declarator:
+		( abstract-declarator )
+		direct-abstract-declarator? [ type-qualifier-list? assignment-expression? ]
+		direct-abstract-declarator? [ static type-qualifier-list? assignment-expression ]
+		direct-abstract-declarator? [ type-qualifier-list static assignment-expression ]
+		direct-abstract-declarator? [ * ]
+		direct-abstract-declarator? ( parameter-type-list opt )
+	+/
+	Type parseTypeName(ref const(Token)[] ref_input)
+	{
+		const(Token)[] input = ref_input;
+		auto specifiers = parseSpecifiers!(SpecifierSet.specifierQualifierList)(input);
+
+		ref_input = input;
+		return specifiersToType(specifiers);
+	}
 }
 
 version(unittest)
