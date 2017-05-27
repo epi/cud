@@ -10,6 +10,11 @@ module cud.lexer;
 import std.range : isInputRange, ElementType, empty, front, popFront;
 
 import cud.token;
+version(unittest)
+{
+	import cud.test;
+	import std.algorithm : map;
+}
 
 private bool isSpace(char x) pure nothrow @nogc
 {
@@ -86,15 +91,18 @@ auto split(string source, string file_name = null)
 
 unittest
 {
-	import std.algorithm : equal;
-	static assert("foo\nbar\rbaz\r\n\nquux".split.equal(
-			[
-				Line(0, "foo"),
-				Line(1, "bar"),
-				Line(2, "baz"),
-				Line(3, ""),
-				Line(4, "quux")
-			]));
+	crtest!("any of CR, CR+LF, LF is accepted as single newline char",
+		() {
+			assertEqual(
+				"foo\nbar\rbaz\r\n\nquux".split,
+				[
+					Line(0, "foo"),
+					Line(1, "bar"),
+					Line(2, "baz"),
+					Line(3, ""),
+					Line(4, "quux")
+				]);
+		});
 }
 
 auto merge(R)(R lines)
@@ -152,13 +160,18 @@ auto merge(R)(R lines)
 
 unittest
 {
-	import std.algorithm : equal;
-	static assert("foo  b\\ \nar\\\nbaz\nquux".split.merge.equal(
-			[
-				Line(0, "foo  barbaz", null, [6, 8]),
-				Line(3, "quux")
-			]));
-	static assert("foo\\".split.merge.equal([Line(0, "foo")]));
+	crtest!("merge lines on backslash",
+		() {
+			assertEqual(
+				"foo  b\\ \nar\\\nbaz\nquux".split.merge,
+				[
+					Line(0, "foo  barbaz", null, [6, 8]),
+					Line(3, "quux")
+				]);
+			assertEqual(
+				"foo\\".split.merge,
+				[Line(0, "foo")]);
+		});
 }
 
 /**
@@ -549,101 +562,126 @@ auto tokenize(R)(R input)
 
 unittest
 {
-	static assert(Line[].init.tokenize.empty);
+	crtest!("empty range of lines is lexed to empty range of tokens",
+		() {
+			assert(Line[].init.tokenize.empty);
+		});
+
+	crtest!("comments are lexed into spaces",
+		() {
+			assertEqual(
+				("  \n // line comment\n   /* multi- // line \n\n\n\n" ~
+				" comment */   \n/* short */\n/*ignore unterminated comment")
+					.split.merge.tokenize,
+				[
+					Token(TokenKind.newline, Location("", 0, 0), ""), // merger cuts spaces at the end of line
+					Token(TokenKind.space,   Location("", 1, 0), " "),
+					Token(TokenKind.space,   Location("", 1, 1), "// line comment"),
+					Token(TokenKind.newline, Location("", 1, 16), ""),
+					Token(TokenKind.space,   Location("", 2, 0), "   "),
+					Token(TokenKind.space,   Location("", 6, 0), " comment */"),
+					Token(TokenKind.newline, Location("", 6, 11), ""),
+					Token(TokenKind.space,   Location("", 7, 0), "/* short */"),
+					Token(TokenKind.newline, Location("", 7, 11), ""),
+				]);
+		});
 }
 
 unittest
 {
-	import std.algorithm : equal;
-	static assert(
-		"  \n // line comment\n   /* multi- // line \n\n\n\n comment */   \n/* short */\n/*ignore unterminated comment"
-			.split.merge.tokenize.equal([
-				Token(TokenKind.newline, Location("", 0, 0), ""), // merger cuts spaces at the end of line
-				Token(TokenKind.space,   Location("", 1, 0), " "),
-				Token(TokenKind.space,   Location("", 1, 1), "// line comment"),
-				Token(TokenKind.newline, Location("", 1, 16), ""),
-				Token(TokenKind.space,   Location("", 2, 0), "   "),
-				Token(TokenKind.space,   Location("", 6, 0), " comment */"),
-				Token(TokenKind.newline, Location("", 6, 11), ""),
-				Token(TokenKind.space,   Location("", 7, 0), "/* short */"),
-				Token(TokenKind.newline, Location("", 7, 11), ""),
-			]));
+	crtest!("lex punctuators",
+		() {
+			with (TokenKind) {
+				assertEqual(
+					("[](){}.->++--&*+-~!/%<<>><><=>===!=^|&&||?:;..." ~
+					"=*=/=%=+=-=<<=>>=&=^=|=,###<::><%%>%:%:%:")
+						.split.merge.tokenize.map!(a => a.kind),
+					[
+						lbracket, rbracket, lparen, rparen, lcurly, rcurly, dot, ptr,
+						plusplus, minusminus, and, mul, plus, minus, tilde, not,
+						div, mod, shl, shr, lt, gt, le, ge, equal, notequal, xor, or, andand, oror,
+						question, colon, semicolon, ellipsis,
+						assign, mulassign, divassign, modassign, plusassign, minusassign,
+						shlassign, shrassign, andassign, xorassign, orassign,
+						comma, hashhash, hash,
+						lbracket, rbracket, lcurly, rcurly, hashhash, hash,
+						newline
+					]);
+			}
+		});
 }
 
 unittest
 {
-	import std.algorithm : map, equal;
-	with (TokenKind) {
-		static assert(
-			"[](){}.->++--&*+-~!/%<<>><><=>===!=^|&&||?:;...=*=/=%=+=-=<<=>>=&=^=|=,###<::><%%>%:%:%:"
-				.split.merge.tokenize.map!(a => a.kind).equal([
-					lbracket, rbracket, lparen, rparen, lcurly, rcurly, dot, ptr,
-					plusplus, minusminus, and, mul, plus, minus, tilde, not,
-					div, mod, shl, shr, lt, gt, le, ge, equal, notequal, xor, or, andand, oror,
-					question, colon, semicolon, ellipsis,
-					assign, mulassign, divassign, modassign, plusassign, minusassign,
-					shlassign, shrassign, andassign, xorassign, orassign,
-					comma, hashhash, hash,
-					lbracket, rbracket, lcurly, rcurly, hashhash, hash,
-					newline
-				]));
-	}
+	crtest!("lex some pptokens",
+		() {
+			assertEqual(
+				"#include <stdio.h>\n<foo\"foo\"\n#include \"foo\""
+					.split.merge.tokenize,
+				[
+					Token(TokenKind.hash,          Location("", 0, 0), "#"),
+					Token(TokenKind.identifier,    Location("", 0, 1), "include"),
+					Token(TokenKind.space,         Location("", 0, 8), " "),
+					Token(TokenKind.headername,    Location("", 0, 9), "<stdio.h>"),
+					Token(TokenKind.newline,       Location("", 0, 18), ""),
+					Token(TokenKind.lt,            Location("", 1, 0), "<"),
+					Token(TokenKind.identifier,    Location("", 1, 1), "foo"),
+					Token(TokenKind.stringliteral, Location("", 1, 4), `"foo"`),
+					Token(TokenKind.newline,       Location("", 1, 9), ""),
+					Token(TokenKind.hash,          Location("", 2, 0), "#"),
+					Token(TokenKind.identifier,    Location("", 2, 1), "include"),
+					Token(TokenKind.space,         Location("", 2, 8), " "),
+					Token(TokenKind.headername,    Location("", 2, 9), `"foo"`),
+					Token(TokenKind.newline,       Location("", 2, 14), ""),
+				]);
+		});
 }
 
 unittest
 {
-	import std.algorithm : equal;
-	static assert(
-		"#include <stdio.h>\n<foo\"foo\"\n#include \"foo\"".split.merge.tokenize.equal([
-				Token(TokenKind.hash,          Location("", 0, 0), "#"),
-				Token(TokenKind.identifier,    Location("", 0, 1), "include"),
-				Token(TokenKind.space,         Location("", 0, 8), " "),
-				Token(TokenKind.headername,    Location("", 0, 9), "<stdio.h>"),
-				Token(TokenKind.newline,       Location("", 0, 18), ""),
-				Token(TokenKind.lt,            Location("", 1, 0), "<"),
-				Token(TokenKind.identifier,    Location("", 1, 1), "foo"),
-				Token(TokenKind.stringliteral, Location("", 1, 4), `"foo"`),
-				Token(TokenKind.newline,       Location("", 1, 9), ""),
-				Token(TokenKind.hash,          Location("", 2, 0), "#"),
-				Token(TokenKind.identifier,    Location("", 2, 1), "include"),
-				Token(TokenKind.space,         Location("", 2, 8), " "),
-				Token(TokenKind.headername,    Location("", 2, 9), `"foo"`),
-				Token(TokenKind.newline,       Location("", 2, 14), ""),
-			]));
+	crtest!("6.4.7, 4. Example",
+		() {
+			enum str = "0x3<1/a.h>1e2\n#include <1/a.h>\n#define const.member@$";
+			assertEqual(
+				str.split.merge.tokenize.map!(t => t.spelling),
+				[
+					"0x3", "<", "1", "/", "a", ".", "h", ">", "1e2", "",
+					"#", "include", " ", "<1/a.h>", "",
+					"#", "define", " ", "const", ".", "member", "@", "$", ""
+				]);
+			with (TokenKind) {
+				assertEqual(
+					str.split.merge.tokenize.map!(t => t.kind),
+					[
+						ppnumber, lt, ppnumber, div, identifier, dot,
+						identifier, gt, ppnumber, newline,
+						hash, identifier, space, headername, newline,
+						hash, identifier, space, identifier, dot, identifier,
+						reserved, reserved, newline
+					]);
+			}
+		});
 }
 
 unittest
 {
-	import std.algorithm : map, equal;
-	enum str = "0x3<1/a.h>1e2\n#include <1/a.h>\n#define const.member@$";
-	static assert(str.split.merge.tokenize.map!(t => t.spelling).equal([
-				"0x3", "<", "1", "/", "a", ".", "h", ">", "1e2", "",
-				"#", "include", " ", "<1/a.h>", "",
-				"#", "define", " ", "const", ".", "member", "@", "$", ""
-			]));
-	with (TokenKind) {
-		static assert(str.split.merge.tokenize.map!(t => t.kind).equal([
-					ppnumber, lt, ppnumber, div, identifier, dot, identifier, gt, ppnumber, newline,
-					hash, identifier, space, headername, newline,
-					hash, identifier, space, identifier, dot, identifier, reserved, reserved, newline
-				]));
-	}
-}
-
-unittest
-{
-	import std.algorithm : map, equal;
 	enum str = `'a'"foo"L'x20'L"bar"u'x'U'x'u"foo"U"bar"`;
-	static assert(str.split.merge.tokenize.map!(t => t.spelling).equal([
-				`'a'`, `"foo"`, `L'x20'`, `L"bar"`,
-				`u'x'`, `U'x'`, `u"foo"`, `U"bar"`, ""
-			]));
-	with (TokenKind) {
-		static assert(str.split.merge.tokenize.map!(t => t.kind).equal([
-					charconstant, stringliteral, charconstant, stringliteral,
-					charconstant, charconstant, stringliteral, stringliteral, newline
-				]));
-	}
+	crtest!("chars and strings",
+		() {
+			assertEqual(
+				str.split.merge.tokenize.map!(t => t.spelling),
+				[
+					`'a'`, `"foo"`, `L'x20'`, `L"bar"`,
+					`u'x'`, `U'x'`, `u"foo"`, `U"bar"`, ""
+				]);
+			with (TokenKind) {
+				assertEqual(str.split.merge.tokenize.map!(t => t.kind),
+					[
+						charconstant, stringliteral, charconstant, stringliteral,
+						charconstant, charconstant, stringliteral, stringliteral, newline
+					]);
+			}
+		});
 }
 
 Token pasteTokens(Token lhs, Token rhs) pure
