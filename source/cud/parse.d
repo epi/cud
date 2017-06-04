@@ -791,6 +791,11 @@ struct Parser {
 			Token volatile_;
 			Token _Atomic_;
 
+			@property bool anyQualifier() const pure nothrow @safe
+			{
+				return const_ || restrict_ || volatile_ || _Atomic_;
+			}
+
 			// 6.7.2 Type specifiers
 			static if (set == SpecifierSet.specifierQualifierList || set == SpecifierSet.declarationSpecifiers) {
 				Token void_;
@@ -1034,6 +1039,9 @@ struct Parser {
 		}
 	}
 
+	alias parseTypeQualifierList =
+		parseSpecifiers!(SpecifierSet.typeQualifierList);
+
 	static Type specifiersToType(S)(ref S spec, bool implicit_int = false)
 	{
 		if (spec.long_long_) {
@@ -1093,17 +1101,72 @@ struct Parser {
 		return type;
 	}
 
-	Type parseDeclaratorBrackets(ref const(Token)[] ref_input)
+	Type parseDeclaratorBrackets(ref const(Token)[] ref_input, Type type)
 	{
+	again:
 		const tok = ref_input.front;
+		writeln(tok);
 		switch (tok.kind) {
 		case tk!`(`:
 			assert(0);
-		case tk!`[`:
-			assert(0);
-		default:
-			return null;
+		case tk!`[`: {
+			bool static_;
+			bool vla_;
+			writeln("braket");
+			ref_input.popFront;
+			if (ref_input.front.kind == tk!`static`) {
+				ref_input.popFront;
+				static_ = true;
+			}
+			auto qualifiers = parseTypeQualifierList(ref_input);
+			if (qualifiers.anyQualifier && !static_ && ref_input.front.kind == tk!`static`) {
+				ref_input.popFront;
+				static_ = true;
+			}
+			Expression expr;
+			if (!static_ && ref_input.front.kind == tk!`*`) {
+				ref_input.popFront;
+				vla_ = true;
+			} else if (ref_input.front.kind != tk!`]`) {
+				expr = parseAssignmentExpression(ref_input);
+				if (!expr)
+					error(ref_input.front.location,
+						"Expected assignment expression");
+			}
+			if (ref_input.front.kind != tk!`]`)
+				error(ref_input.front.location,
+					"Expected ']'");
+			ref_input.popFront;
+			type = new ArrayType(type, expr);
+			goto again;
 		}
+		default:
+			return type;
+		}
+	}
+
+	private const(Token)[] skipToParen(ref const(Token)[] ref_input)
+	{
+		ref_input.popFront;
+		auto paren_decl = ref_input;
+		int nest = 1;
+		while (nest) {
+			switch (ref_input.front.kind) {
+			case tk!`(`:
+				nest++;
+				break;
+			case tk!`)`:
+				nest--;
+				break;
+			case tk!`eof`:
+			case tk!`;`:
+				error(ref_input.front.location, "expected ')'");
+				assert(0);
+			default:
+			}
+			ref_input.popFront;
+		}
+		return paren_decl;
 	}
 
 	Declarator parseDeclarator(ref const(Token)[] ref_input, Type type = null)
@@ -1114,25 +1177,7 @@ struct Parser {
 		type = parsePointer(input, type);
 		const tok = input.front;
 		if (tok.kind == tk!`(`) {
-			input.popFront;
-			paren_decl = input;
-			int nest = 1;
-			while (nest) {
-				switch (input.front.kind) {
-				case tk!`(`:
-					nest++;
-					break;
-				case tk!`)`:
-					nest--;
-					break;
-				case tk!`eof`:
-				case tk!`;`:
-					error(input.front.location, "expected ')'");
-					assert(0);
-				default:
-				}
-				input.popFront;
-			}
+			paren_decl = skipToParen(input);
 		} else if (tok.kind == tk!`identifier`) {
 			identifier = input.front.spelling;
 			input.popFront;
@@ -1141,8 +1186,7 @@ struct Parser {
 			assert(0);
 		}
 
-		if (auto t = parseDeclaratorBrackets(input))
-			type = t;
+		type = parseDeclaratorBrackets(input, type);
 
 		if (paren_decl) {
 			auto result = parseDeclarator(paren_decl, type);
@@ -1158,6 +1202,31 @@ struct Parser {
 
 		ref_input = input;
 		return Declarator(type, identifier);
+	}
+
+	Type parseAbstractDeclarator(ref const(Token)[] ref_input, Type type = null)
+	{
+		const(Token)[] paren_decl;
+		const(Token)[] input = ref_input;
+		type = parsePointer(input, type);
+		const tok = input.front;
+
+		if (tok.kind == tk!`(`)
+			paren_decl = skipToParen(input);
+
+		type = parseDeclaratorBrackets(input, type);
+
+		if (paren_decl) {
+			type = parseAbstractDeclarator(paren_decl, type);
+			if (paren_decl.front.kind != tk!`)`) {
+				error(paren_decl.front.location,
+					"expected ')' after abstract declarator, not '%s'",
+					paren_decl.front.spelling);
+				assert(0);
+			}
+		}
+		ref_input = input;
+		return type;
 	}
 
 	/+
@@ -1181,8 +1250,10 @@ struct Parser {
 		const(Token)[] input = ref_input;
 		auto specifiers = parseSpecifiers!(SpecifierSet.specifierQualifierList)(input);
 
+		auto type = parseAbstractDeclarator(input, specifiersToType(specifiers));
+
 		ref_input = input;
-		return specifiersToType(specifiers);
+		return type;
 	}
 }
 
@@ -1628,18 +1699,20 @@ unittest
 		() {
 			foreach (src, type_str; [
 					"int"           : "int",
-				/+	"int *"         : "ptr(int)",
+					"int *"         : "ptr(int)",
 					"int *[3]"      : "array[3](ptr(int))",
 					"int (*)[3]"    : "ptr(array[3](int))",
-					"int (*)[*]"    : "ptr(vlarray[?](int))",
-					"int *()"       : "func(?:ptr(int))",
+					"int (*)[*]"    : "ptr(array[*](int))",
+				/+	"int *()"       : "func(?:ptr(int))",
 					"int (*)(void)" : "func(:int)",
 					"int (*const [])(unsigned int, ...)"
 					                : "array[?](const(ptr(func(uint,...:int))))"+/
 				])
 			{
 				import std.conv : text;
-				assert(parse!"TypeName"(src).toString == type_str, text(src, " !=> ", type_str));
+				auto ts = parse!"TypeName"(src).toString;
+				assert(ts == type_str, text("input: ", src, "  expected: ", type_str,
+						"  actual: ", ts));
 			}
 		});
 }

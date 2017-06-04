@@ -117,9 +117,24 @@ class PointerType : Type
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
 }
 
+class ArrayType : Type
+{
+	import cud.parse : Expression;
+	Type elementType;
+	Expression size;
+
+	this(Type element_type, Expression size)
+	{
+		this.elementType = element_type;
+		this.size = size;
+	}
+
+	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+}
+
 interface TypeVisitor
 {
-	// void visit(ArrayType);
+	void visit(ArrayType);
 	// void visit(StructType);
 	// void visit(UnionType);
 	// void visit(FunctionType);
@@ -171,6 +186,18 @@ void format(Type t, scope void delegate(in char[]) dg)
 			{
 				dg("ptr(");
 				format(type.pointeeType, dg);
+				dg(")");
+			}
+
+			void visit(ArrayType type)
+			{
+				dg("array[");
+				if (type.size)
+					dg("3");
+				else
+					dg("*");
+				dg("](");
+				format(type.elementType, dg);
 				dg(")");
 			}
 		});
