@@ -1049,36 +1049,36 @@ struct Parser {
 	alias parseTypeQualifierList =
 		parseSpecifiers!(SpecifierSet.typeQualifierList);
 
-	static Type specifiersToType(S)(ref S spec, bool implicit_int = false)
+	Type specifiersToType(S)(ref S spec, bool implicit_int = false)
 	{
 		if (spec.long_long_) {
 			if (spec.signed_)
-				return new BuiltinType(BuiltinType.Kind.slonglong_);
+				return m_bt.get!`slonglong`;
 			else if (spec.unsigned_)
-				return new BuiltinType(BuiltinType.Kind.ulonglong_);
+				return m_bt.get!`ulonglong`;
 			else
-				return new BuiltinType(BuiltinType.Kind.longlong_);
+				return m_bt.get!`longlong`;
 		} else if (spec.long_) {
 			if (spec.signed_)
-				return new BuiltinType(BuiltinType.Kind.slong_);
+				return m_bt.get!`slong`;
 			else if (spec.unsigned_)
-				return new BuiltinType(BuiltinType.Kind.ulong_);
+				return m_bt.get!`ulong`;
 			else
-				return new BuiltinType(BuiltinType.Kind.long_);
+				return m_bt.get!`long`;
 		} else if (spec.short_) {
 			if (spec.signed_)
-				return new BuiltinType(BuiltinType.Kind.sshort_);
+				return m_bt.get!`sshort`;
 			else if (spec.unsigned_)
-				return new BuiltinType(BuiltinType.Kind.ushort_);
+				return m_bt.get!`ushort`;
 			else
-				return new BuiltinType(BuiltinType.Kind.ulong_);
+				return m_bt.get!`ulong`;
 		} else {
 			if (spec.signed_)
-				return new BuiltinType(BuiltinType.Kind.sint_);
+				return m_bt.get!`sint`;
 			else if (spec.unsigned_)
-				return new BuiltinType(BuiltinType.Kind.uint_);
+				return m_bt.get!`uint`;
 			else if (spec.int_ || implicit_int)
-				return new BuiltinType(BuiltinType.Kind.int_);
+				return m_bt.get!`int`;
 		}
 		return null;
 
