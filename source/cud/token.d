@@ -113,24 +113,19 @@ struct Token
 	Location location; ///
 	string spelling; ///
 	union {
-		long signedInt64Value;
-		ulong unsignedInt64Value;
+		int intValue;
+		uint uintValue;
+		long longValue;
+		ulong ulongValue;
 	}
 
 	static Token makeConstant(T)(T value, Location loc, string spelling)
 	{
 		import std.meta : AliasSeq, staticIndexOf;
 		import std.traits : isSigned, isUnsigned;
-		alias Types = AliasSeq!(int, uint, long, ulong);
-		enum kinds = [tk!`intconst`, tk!`uintconst`, tk!`longconst`, tk!`ulongconst`];
-		enum kind = kinds[staticIndexOf!(T, Types)];
+		enum kind = mixin("tk!`" ~ T.stringof ~ "const`");
 		auto result = Token(kind, loc, spelling);
-		static if (isSigned!T)
-			result.signedInt64Value = value;
-		else static if (isUnsigned!T)
-			result.unsignedInt64Value = value;
-		else
-			static assert(0);
+		mixin("result." ~ T.stringof ~ "Value = value;");
 		return result;
 	}
 
@@ -383,10 +378,14 @@ unittest
 	{
 		auto token = ppnum(spelling);
 		assert(token.kind == kind);
-		if (kind == tk!`intconst` || kind == tk!`longconst`)
-			assert(token.signedInt64Value == value);
-		else if (kind == tk!`uintconst` || kind == tk!`ulongconst`)
-			assert(token.unsignedInt64Value == value);
+		if (kind == tk!`intconst`)
+			assert(token.intValue == value);
+		else if (kind == tk!`longconst`)
+			assert(token.longValue == value);
+		else if (kind == tk!`uintconst`)
+			assert(token.uintValue == value);
+		else if (kind == tk!`ulongconst`)
+			assert(token.ulongValue == value);
 	}
 
 	crtest!("convert pp tokens to integer constants",

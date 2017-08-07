@@ -14,7 +14,25 @@ class Type
 	}
 }
 
-class BaseBuiltinType : Type
+struct BuiltinTypes
+{
+	BuiltinType[BuiltinType.Kind.max + 1] types;
+
+	BuiltinType get(string s)()
+	{
+		return types[mixin("BuiltinType.Kind." ~ s ~ "_")];
+	}
+
+	void initialize()
+	{
+		foreach (ms; __traits(allMembers, BuiltinType.Kind)) {
+			types[mixin("BuiltinType.Kind." ~ ms)] =
+				new BuiltinType(mixin("BuiltinType.Kind." ~ ms));
+		}
+	}
+}
+
+class BuiltinType : Type
 {
 	enum Kind {
 		void_,
@@ -55,16 +73,9 @@ class BaseBuiltinType : Type
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
 }
 
-deprecated
-class BuiltinType(_DType) : BaseBuiltinType
-{
-	alias DType = _DType;
+enum ty(string t) = mixin("BuiltinType.Kind." ~ t ~ "_");
 
-	this()
-	{
-		super(mixin("BaseBuiltinType.Kind." ~ _DType.stringof ~ "_"));
-	}
-}
+static assert(ty!`longdouble` == BuiltinType.Kind.longdouble_);
 
 class AtomicType : Type
 {
@@ -139,7 +150,7 @@ interface TypeVisitor
 	// void visit(UnionType);
 	// void visit(FunctionType);
 	void visit(AtomicType);
-	void visit(BaseBuiltinType);
+	void visit(BuiltinType);
 	void visit(QualifiedType);
 	void visit(PointerType);
 }
@@ -159,7 +170,7 @@ void format(Type t, scope void delegate(in char[]) dg)
 				dg(")");
 			}
 
-			void visit(BaseBuiltinType type)
+			void visit(BuiltinType type)
 			{
 				import std.conv : to;
 				dg(type.kind.to!string[0 .. $ - 1]);

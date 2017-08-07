@@ -124,7 +124,8 @@ class TypeTraitExpression : Expression
 
 	this(Location location, TypeTrait trait, Type type)
 	{
-		super(location, new BuiltinType!int, false);
+		//FIXME: don't create new BuiltinType here
+		super(location, new BuiltinType(BuiltinType.Kind.int_), false);
 		this.trait = trait;
 		this.theType = type;
 	}
@@ -319,6 +320,15 @@ class EnumDeclaration : Declaration
 struct Parser {
 	import std.meta : Filter;
 
+	private BuiltinTypes m_bt;
+
+	static Parser opCall()
+	{
+		auto result = Parser.init;
+		result.m_bt.initialize();
+		return result;
+	}
+
 	Expression parseAssignmentExpression(ref const(Token)[] input)
 	{
 		return parsePostfixExpression(input);
@@ -334,32 +344,29 @@ struct Parser {
 	+/
 	Expression parsePrimaryExpression(ref const(Token)[] input)
 	{
+		import std.meta : AliasSeq;
 		const tok = input.front;
 		switch (tok.kind) {
-			case tk!`intconst`:
-				input.popFront;
-				return new IntegerConstant(tok.location, new BuiltinType!int, tok.signedInt64Value);
-			case tk!`uintconst`:
-				input.popFront;
-				return new IntegerConstant(tok.location, new BuiltinType!uint, tok.unsignedInt64Value);
-			case tk!`longconst`:
-				input.popFront;
-				return new IntegerConstant(tok.location, new BuiltinType!long, tok.signedInt64Value);
-			case tk!`ulongconst`:
-				input.popFront;
-				return new IntegerConstant(tok.location, new BuiltinType!ulong, tok.unsignedInt64Value);
-			case tk!`(`: {
-				const(Token)[] temp_input = input;
-				temp_input.popFront;
-				Expression e = parseExpression(temp_input);
-				if (!e || temp_input.front.kind != tk!`)`)
-					return null;
-				temp_input.popFront;
-				input = temp_input;
-				return e;
+		foreach (typestr; AliasSeq!("int", "uint", "long", "ulong")) {
+		case tk!(typestr ~ `const`):
+			input.popFront;
+			return new IntegerConstant(
+				tok.location,
+				m_bt.get!typestr,
+				mixin("tok." ~ typestr ~ "Value"));
 			}
-			default:
+		case tk!`(`: {
+			const(Token)[] temp_input = input;
+			temp_input.popFront;
+			Expression e = parseExpression(temp_input);
+			if (!e || temp_input.front.kind != tk!`)`)
 				return null;
+			temp_input.popFront;
+			input = temp_input;
+			return e;
+		}
+		default:
+			return null;
 		}
 	}
 
@@ -1046,32 +1053,32 @@ struct Parser {
 	{
 		if (spec.long_long_) {
 			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.slonglong_);
+				return new BuiltinType(BuiltinType.Kind.slonglong_);
 			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulonglong_);
+				return new BuiltinType(BuiltinType.Kind.ulonglong_);
 			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.longlong_);
+				return new BuiltinType(BuiltinType.Kind.longlong_);
 		} else if (spec.long_) {
 			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.slong_);
+				return new BuiltinType(BuiltinType.Kind.slong_);
 			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+				return new BuiltinType(BuiltinType.Kind.ulong_);
 			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.long_);
+				return new BuiltinType(BuiltinType.Kind.long_);
 		} else if (spec.short_) {
 			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.sshort_);
+				return new BuiltinType(BuiltinType.Kind.sshort_);
 			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ushort_);
+				return new BuiltinType(BuiltinType.Kind.ushort_);
 			else
-				return new BaseBuiltinType(BaseBuiltinType.Kind.ulong_);
+				return new BuiltinType(BuiltinType.Kind.ulong_);
 		} else {
 			if (spec.signed_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.sint_);
+				return new BuiltinType(BuiltinType.Kind.sint_);
 			else if (spec.unsigned_)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.uint_);
+				return new BuiltinType(BuiltinType.Kind.uint_);
 			else if (spec.int_ || implicit_int)
-				return new BaseBuiltinType(BaseBuiltinType.Kind.int_);
+				return new BuiltinType(BuiltinType.Kind.int_);
 		}
 		return null;
 
@@ -1105,14 +1112,14 @@ struct Parser {
 	{
 	again:
 		const tok = ref_input.front;
-		writeln(tok);
+		// writeln(tok);
 		switch (tok.kind) {
 		case tk!`(`:
 			assert(0);
 		case tk!`[`: {
 			bool static_;
 			bool vla_;
-			writeln("braket");
+			//writeln("braket");
 			ref_input.popFront;
 			if (ref_input.front.kind == tk!`static`) {
 				ref_input.popFront;
@@ -1291,26 +1298,26 @@ unittest // primaryExpression
 		() {
 			if (auto e = expr("0").as!IntegerConstant) {
 				assert(e.value == 0);
-				assert(e.type.as!(BuiltinType!int));
+				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
 			}
 			if (auto e = expr("42l").as!IntegerConstant) {
 				assert(e.value == 42);
-				assert(e.type.as!(BuiltinType!long));
+				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.long_);
 			}
 			if (auto e = expr("0777u").as!IntegerConstant) {
 				assert(e.value == 0x1ff);
-				assert(e.type.as!(BuiltinType!uint));
+				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.uint_);
 			}
 			if (auto e = expr("1337ull").as!IntegerConstant) {
 				assert(e.value == 1337);
-				assert(e.type.as!(BuiltinType!ulong));
+				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.ulong_);
 			}
 		});
 	crtest!("parenthesized constant",
 		() {
 			if (auto e = expr("(42)").as!IntegerConstant) {
 				assert(e.value == 42);
-				assert(e.type.as!(BuiltinType!int));
+				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
 			}
 		});
 }
@@ -1500,7 +1507,7 @@ unittest
 			assert(sq.alignment[0].as!IntegerConstant.value == 16);
 			auto tt = sq.alignment[1].as!TypeTraitExpression;
 			assert(tt.trait == TypeTrait.alignof_);
-			assert(tt.theType.as!BaseBuiltinType.kind == BaseBuiltinType.kind.int_);
+			assert(tt.theType.as!BuiltinType.kind == BuiltinType.kind.int_);
 			assert(!sq.restrict_);
 			assert(!sq.volatile_);
 			assert(!sq._Atomic_);
