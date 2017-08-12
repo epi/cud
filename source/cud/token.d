@@ -112,21 +112,13 @@ struct Token
 	TokenKind kind = tk!``;
 	Location location; ///
 	string spelling; ///
-	union {
-		int intValue;
-		uint uintValue;
-		long longValue;
-		ulong ulongValue;
-	}
+	long longValue;
 
 	static Token makeConstant(T)(T value, Location loc, string spelling)
+		if (is(T : long))
 	{
-		import std.meta : AliasSeq, staticIndexOf;
-		import std.traits : isSigned, isUnsigned;
 		enum kind = mixin("tk!`" ~ T.stringof ~ "const`");
-		auto result = Token(kind, loc, spelling);
-		mixin("result." ~ T.stringof ~ "Value = value;");
-		return result;
+		return Token(kind, loc, spelling, value);
 	}
 
 	void toString(scope void delegate(const(char)[]) dg) const
@@ -378,14 +370,7 @@ unittest
 	{
 		auto token = ppnum(spelling);
 		assert(token.kind == kind);
-		if (kind == tk!`intconst`)
-			assert(token.intValue == value);
-		else if (kind == tk!`longconst`)
-			assert(token.longValue == value);
-		else if (kind == tk!`uintconst`)
-			assert(token.uintValue == value);
-		else if (kind == tk!`ulongconst`)
-			assert(token.ulongValue == value);
+		assert(cast(T) token.longValue == value);
 	}
 
 	crtest!("convert pp tokens to integer constants",

@@ -20,7 +20,7 @@ version(unittest) {
 	import cud.test;
 }
 
-class Expression
+class Expr
 {
 	Location location;
 	Type type;
@@ -36,11 +36,13 @@ class Expression
 	abstract void accept(ExpressionVisitor ev);
 }
 
+deprecated alias Expression = Expr;
+
 class IntegerConstant : Expression
 {
-	ulong value;
+	long value;
 
-	this(Location location, Type type, ulong value)
+	this(Location location, Type type, long value)
 	{
 		super(location, type, false);
 		this.value = value;
@@ -318,386 +320,324 @@ class EnumDeclaration : Declaration
 }
 
 struct Parser {
-	import std.meta : Filter;
-
 	private BuiltinTypes m_bt;
+	private const(Token)[] m_input;
 
-	static Parser opCall()
+	this(const(Token)[] input)
 	{
-		auto result = Parser.init;
-		result.m_bt.initialize();
-		return result;
+		m_input = input;
+		m_bt.initialize();
 	}
 
-	Expression parseAssignmentExpression(ref const(Token)[] input)
+	@property Token current() pure nothrow const @nogc
 	{
-		return parsePostfixExpression(input);
+		return m_input[0];
 	}
 
-	/+
-	PrimaryExpression < Identifier
-	                  / CharLiteral
-	                  / StringLiteral
-	                  / FloatLiteral
-	                  / IntegerLiteral
-	                  / '(' Expression ')'
-	+/
-	Expression parsePrimaryExpression(ref const(Token)[] input)
+	void next() nothrow @nogc
 	{
-		import std.meta : AliasSeq;
-		const tok = input.front;
-		switch (tok.kind) {
-		foreach (typestr; AliasSeq!("int", "uint", "long", "ulong")) {
-		case tk!(typestr ~ `const`):
-			input.popFront;
-			return new IntegerConstant(
-				tok.location,
-				m_bt.get!typestr,
-				mixin("tok." ~ typestr ~ "Value"));
-			}
-		case tk!`(`: {
-			const(Token)[] temp_input = input;
-			temp_input.popFront;
-			Expression e = parseExpression(temp_input);
-			if (!e || temp_input.front.kind != tk!`)`)
-				return null;
-			temp_input.popFront;
-			input = temp_input;
-			return e;
-		}
-		default:
-			return null;
-		}
+		m_input = m_input[1 .. $];
 	}
 
-	/+
-	PostfixExpression < PrimaryExpression ( '[' Expression ']'
-		/ '(' ')'
-		/ '(' ArgumentExpressionList ')'
-		/ '.' Identifier
-		/ "->" Identifier
-		/ "++"
-		/ "--"
-		)*
-
-		ArgumentExpressionList < AssignmentExpression (',' AssignmentExpression)*
-	+/
-	Expression parsePostfixExpression(ref const(Token)[] input)
+	auto match(string token_kinds)()
 	{
-		const(Token)[] temp_input = input;
-		Expression pe = parsePrimaryExpression(temp_input);
-		if (!pe)
-			return null;
-		input = temp_input;
-		for (;;) {
-			Expression outer;
-			const tok = temp_input.front;
-			switch (tok.kind) {
-			case tk!`[`: {
-				temp_input.popFront;
-				Expression e = parseExpression(temp_input);
-				if (!e || temp_input.front.kind != tk!`]`)
-					break;
-				temp_input.popFront;
-				input = temp_input;
-				outer = new IndexExpression(tok.location, pe, e);
-				break;
+		const tok = m_input.front;
+		foreach (k; tks!token_kinds) {
+			if (tok.kind == k) {
+				m_input.popFront;
+				return tok;
 			}
-			case tk!`(`: {
-				temp_input.popFront;
-				Expression[] args;
-				if (temp_input.front.kind != tk!`)`) {
-					for (;;) {
-						Expression e = parseAssignmentExpression(temp_input);
-						if (!e)
-							break;
-						if (temp_input.front.kind == tk!`,`) {
-							args ~= e;
-							temp_input.popFront;
-						} else if (temp_input.front.kind == tk!`)`) {
-							args ~= e;
-							break;
-						} else {
-							break;
-						}
-					}
-				}
-				if (temp_input.front.kind == tk!`)`) {
-					temp_input.popFront;
-					input = temp_input;
-					outer = new CallExpression(tok.location, pe, args);
-				}
-				break;
-			}
-			case tk!`->`:
-			case tk!`.`: {
-				temp_input.popFront;
-				if (temp_input.front.kind == tk!`identifier`) {
-					auto ident = temp_input.front.spelling;
-					temp_input.popFront;
-					input = temp_input;
-					outer = new MemberExpression(
-						tok.location, pe, ident, tok.kind == tk!`->`);
-				}
-				break;
-			}
-			case tk!`++`:
-			case tk!`--`:
-				temp_input.popFront;
-				input = temp_input;
-				outer = new UnaryExpression(
-					tok.location,
-					tok.kind == tk!`++` ? tk!`post++` : tk!`post--`,
-					pe);
-				break;
-			default:
-			}
-			if (!outer)
-				return pe;
-			pe = outer;
 		}
+		return Token.init;
+	}
+
+	auto peek(string token_kinds)()
+	{
+		const tok = m_input.front;
+		foreach (k; tks!token_kinds) {
+			if (tok.kind == k)
+				return tok;
+		}
+		return Token.init;
+	}
+
+	auto expect(string token_kinds)()
+	{
+		const tok = m_input.front;
+		foreach (k; tks!token_kinds) {
+			if (tok.kind == k) {
+				m_input.popFront;
+				return tok;
+			}
+		}
+		error(tok.location, "Expected " ~ token_kinds);
 		assert(0);
 	}
 
-	/+
-	UnaryExpression < PostfixExpression
-		/ IncrementExpression
-		/ DecrementExpression
-		/ UnaryOperator CastExpression
-		/ "sizeof" UnaryExpression
-		/ "sizeof" '(' TypeName ')'
-
-	IncrementExpression < PlusPlus UnaryExpression
-
-	PlusPlus <- "++"
-
-	DecrementExpression < "--" UnaryExpression
-
-	UnaryOperator <- [-&*+~!]
-	+/
-	Expression parseUnaryExpression(ref const(Token)[] input)
+	// returns true if the front token starts an expression
+	bool peekExpr()
 	{
-		const(Token)[] temp_input = input;
-		if (auto expr = parsePostfixExpression(temp_input)) {
-			input = temp_input;
-			return expr;
-		}
-		const tok = temp_input.front;
-		temp_input.popFront;
-		switch (tok.kind) {
-		foreach (t; tks!`++ -- sizeof`) {
-			case t: goto unaryexpr;
-		}
-		unaryexpr: {
-			auto expr = parseUnaryExpression(temp_input);
-			if (expr) {
-				input = temp_input;
-				return new UnaryExpression(tok.location, tok.kind, expr);
-			} else if (tok.kind == tk!`sizeof` && temp_input.front.kind == tk!`(`) {
-				temp_input.popFront;
-				auto type = parseTypeName(temp_input);
-				if (!type || temp_input.front.kind != tk!`)`)
-					return null;
-				temp_input.popFront;
-				input = temp_input;
-				return new TypeTraitExpression(tok.location, TypeTrait.alignof_, type);
-			} else
-				return null;
-		}
-		foreach (t; tks!`- & * + ~ !`) {
-			case t: goto castexpr;
-		}
-		castexpr: {
-			auto expr = parseCastExpression(temp_input);
-			if (!expr)
-				return null;
-			input = temp_input;
-			return new UnaryExpression(tok.location, tok.kind, expr);
-		}
-		default:
-			return null;
-		}
+		if (peek!`- & * + ~ ! -- ++ sizeof intconst uintconst longconst ulongconst`)
+			return true;
+		else if (auto tok = peek!`identifier`)
+			return isVariable(tok.spelling);
+		else
+			return false;
 	}
 
-	/+
-	CastExpression < UnaryExpression
-		/ '(' TypeName ')' CastExpression
-	+/
-	Expression parseCastExpression(ref const(Token)[] input)
-	{
-		const(Token)[] temp_input = input;
-		if (auto expr = parseUnaryExpression(temp_input)) {
-			input = temp_input;
-			return expr;
-		}
-		const tok = temp_input.front;
-		temp_input.popFront;
-		if (tok.kind == tk!`(`) {
-			auto type = parseTypeName(temp_input);
-			if (!type || temp_input.front.kind != tk!`)`)
-				return null;
-			temp_input.popFront;
-			auto expr = parseCastExpression(temp_input);
-			if (!expr)
-				return null;
-			input = temp_input;
-			return new CastExpression(tok.location, type, expr);
-		}
-		return null;
-	}
+	/*
+	primary-expression:
+		identifier
+		constant
+		string-literal
+		( expression )
+		generic-selection
 
-	Expression parseBinaryExpression(string subparser, tokenKinds...)(
-		ref const(Token)[] input)
+	postfix-expression:
+		primary-expression
+		postfix-expression [ expression ]
+		postfix-expression ( argument-expression-listopt )
+		postfix-expression . identifier
+		postfix-expression -> identifier
+		postfix-expression ++
+		postfix-expression --
+		( type-name ) { initializer-list }
+		( type-name ) { initializer-list , }
+
+	argument-expression-list:
+		assignment-expression
+		argument-expression-list , assignment-expression
+	*/
+	Expr parsePostfixExpr()
 	{
-		Expression[] operands;
-		TokenKind[] operators;
-		Location[] locations;
-		const(Token)[] temp_input = input;
-		for (;;) {
-			auto expr = mixin(subparser ~ "(temp_input)");
-			if (!expr)
-				break;
-			operands ~= expr;
-			input = temp_input;
-			const tok = temp_input.front;
-			temp_input.popFront;
-			foreach (tk; tokenKinds) {
-				if (tk == tok.kind) {
-					locations ~= tok.location;
-					operators ~= tk;
-					goto next;
+		import std.meta : AliasSeq;
+		Expr result = {
+			foreach (typestr; AliasSeq!("uint", "int", "long", "ulong", "char")) {
+				if (auto tok = match!(typestr ~ "const")) {
+					return new IntegerConstant(
+						tok.location,
+						m_bt.get!typestr,
+						tok.longValue);
 				}
 			}
-			break;
-		next:
-		}
-		if (!operands.length)
-			return null;
-		Expression result = operands[0];
-		operands.popFront;
-		while (operands.length) {
-			result = new BinaryExpression(locations[0], operators[0], result, operands[0]);
-			locations.popFront;
-			operands.popFront;
-			operators.popFront;
+			if (match!`stringliteral`) {
+				assert(0, "not implemented");
+			} else if (match!`identifier`) {
+				assert(0, "not implemented");
+			} else {
+				error(current.location,
+					"Expected expression, not '%s'", current.spelling);
+				assert(0);
+			}
+		}();
+		for (;;) {
+			if (auto tok = match!`[`) {
+				auto e = parseExpr();
+				expect!`]`;
+				result = new IndexExpression(tok.location, result, e);
+			} else if (auto tok = match!`(`) {
+				Expr[] args;
+				if (!match!`)`) {
+					for (;;) {
+						args ~= parseAssignExpr();
+						if (match!`)`)
+							break;
+						expect!`,`;
+					}
+				}
+				result = new CallExpression(tok.location, result, args);
+			} else if (auto tok = match!`. ->`) {
+				auto ident = expect!`identifier`;
+				result = new MemberExpression(
+					tok.location, result, ident.spelling, tok.kind == tk!`->`);
+			} else if (auto tok = match!`++ --`) {
+				result = new UnaryExpression(
+					tok.location,
+					tok.kind == tk!`++` ? tk!`post++` : tk!`post--`,
+					result);
+			} else {
+				break;
+			}
 		}
 		return result;
 	}
 
-	// MultiplicativeExpression < CastExpression ([*%/] MultiplicativeExpression)*
-	Expression parseMultiplicativeExpression(ref const(Token)[] input)
+	/*
+	unary-expression:
+		postfix-expression
+		++ unary-expression
+		-- unary-expression
+		unary-operator cast-expression
+		sizeof unary-expression
+		sizeof ( type-name )
+		_Alignof ( type-name )
+
+	unary-operator: one of
+		& * + - ~ !
+	*/
+	Expr parseUnaryExpr()
 	{
-		return parseBinaryExpression!("parseCastExpression",
-			tk!`*`, tk!`%`, tk!`/`)(input);
+		if (auto op = match!`++ --`) {
+			return new UnaryExpression(op.location, op.kind, parseUnaryExpr());
+		} else if (auto op = match!`& * + - ~ !`) {
+			return new UnaryExpression(op.location, op.kind, parseCastExpr());
+		} else if (auto op = match!`sizeof`) {
+			if (auto lparen = match!`(`) {
+				Type t = peekExpr()
+					? parseExpr().type
+					: parseTypeName();
+				expect!`)`;
+				return new TypeTraitExpression(op.location, TypeTrait.sizeof_, t);
+			} else {
+				return new TypeTraitExpression(
+					op.location, TypeTrait.sizeof_, parseExpr().type);
+			}
+		} else if (auto op = match!`_Alignof`) {
+			assert(0, "Not implemented");
+		}
+		return parsePostfixExpr();
 	}
 
-	// AdditiveExpression < MultiplicativeExpression ([-+] AdditiveExpression)*
-	Expression parseAdditiveExpression(ref const(Token)[] input)
+	bool isVariable(string ident)
 	{
-		return parseBinaryExpression!("parseMultiplicativeExpression",
-			tk!`+`, tk!`-`)(input);
+		// TODO
+		return true;
 	}
 
-	//ShiftExpression < AdditiveExpression (("<<" / ">>") ShiftExpression)*
-	Expression parseShiftExpression(ref const(Token)[] input)
+	/*
+	cast-expression:
+		unary-expression
+		( type-name ) cast-expression
+	*/
+	Expr parseCastExpr()
 	{
-		return parseBinaryExpression!("parseAdditiveExpression",
-			tk!`<<`, tk!`>>`)(input);
+		if (auto lparen = match!`(`) {
+			if (peek!`(`) {
+				Expr e = parseCastExpr();
+				expect!`)`;
+				return e;
+			} else if (peekExpr()) {
+				Expr e = parseExpr();
+				expect!`)`;
+				return e;
+			} else {
+				Type t = parseTypeName();
+				expect!`)`;
+				// TODO: compound literal
+				return new CastExpression(lparen.location, t, parseCastExpr());
+			}
+		} else {
+			return parseUnaryExpr();
+		}
 	}
 
-	// RelationalExpression < ShiftExpression (("<=" / ">=" / "<" / ">") RelationalExpression)*
-	Expression parseRelationalExpression(ref const(Token)[] input)
+	Expr parseBinaryExpr(alias subparser, string tokenKinds)()
 	{
-		return parseBinaryExpression!("parseShiftExpression",
-			tk!`<=`, tk!`>=`, tk!`<`, tk!`>`)(input);
+		Expr e = subparser();
+		for (;;) {
+			if (auto tok = match!tokenKinds)
+				e = new BinaryExpression(tok.location, tok.kind, e, subparser());
+			else
+				break;
+		}
+		return e;
 	}
 
-	// EqualityExpression < RelationalExpression (("==" / "!=") EqualityExpression)*
-	Expression parseEqualityExpression(ref const(Token)[] input)
+	Expr parseMulExpr()
 	{
-		return parseBinaryExpression!("parseRelationalExpression",
-			tk!`==`, tk!`!=`)(input);
+		return parseBinaryExpr!(parseCastExpr, `* / %`);
 	}
 
-	// ANDExpression < EqualityExpression ('&' ANDExpression)*
-	Expression parseAndExpression(ref const(Token)[] input)
+	Expr parseAddExpr()
 	{
-		return parseBinaryExpression!("parseEqualityExpression", tk!`&`)(input);
+		return parseBinaryExpr!(parseMulExpr, `+ -`);
 	}
 
-	// ExclusiveORExpression < ANDExpression ('^' ExclusiveORExpression)*
-	Expression parseExclusiveOrExpression(ref const(Token)[] input)
+	Expr parseShiftExpr()
 	{
-		return parseBinaryExpression!("parseAndExpression", tk!`^`)(input);
+		return parseBinaryExpr!(parseAddExpr, `<< >>`);
 	}
 
-	// InclusiveORExpression < ExclusiveORExpression ('|' InclusiveORExpression)*
-	Expression parseInclusiveOrExpression(ref const(Token)[] input)
+	Expr parseRelExpr()
 	{
-		return parseBinaryExpression!("parseExclusiveOrExpression", tk!`|`)(input);
+		return parseBinaryExpr!(parseShiftExpr, `<= >= < >`);
 	}
 
-	// LogicalANDExpression < InclusiveORExpression ("&&" LogicalANDExpression)*
-	Expression parseLogicalAndExpression(ref const(Token)[] input)
+	Expr parseEqualityExpr()
 	{
-		return parseBinaryExpression!("parseInclusiveOrExpression", tk!`&&`)(input);
+		return parseBinaryExpr!(parseRelExpr, `== !=`);
 	}
 
-	// LogicalORExpression < LogicalANDExpression ("||" LogicalORExpression)*
-	Expression parseLogicalOrExpression(ref const(Token)[] input)
+	Expr parseAndExpr()
 	{
-		return parseBinaryExpression!("parseLogicalAndExpression", tk!`||`)(input);
+		return parseBinaryExpr!(parseEqualityExpr, `&`);
 	}
 
-	// ConditionalExpression < LogicalORExpression ('?' Expression ':' ConditionalExpression)?
-	Expression parseConditionalExpression(ref const(Token)[] input)
+	Expr parseXorExpr()
 	{
-		const(Token)[] temp_input = input;
-		auto condition = parseLogicalOrExpression(temp_input);
-		if (!condition)
-			return null;
-		input = temp_input;
-		const qtok = temp_input.front;
-		if (qtok.kind != tk!`?`)
-			return condition;
-		temp_input.popFront;
-		auto trueExpression = parseExpression(temp_input);
-		if (!trueExpression)
-			return condition;
-		if (temp_input.front.kind != tk!`:`)
-			return condition;
-		temp_input.popFront;
-		auto falseExpression = parseConditionalExpression(temp_input);
-		if (!falseExpression)
-			return condition;
-		input = temp_input;
-		return new ConditionalExpression(
-			qtok.location, condition, trueExpression, falseExpression);
+		return parseBinaryExpr!(parseAndExpr, `^`);
 	}
 
-	// TODO:
+	Expr parseOrExpr()
+	{
+		return parseBinaryExpr!(parseXorExpr, `|`);
+	}
+
+	Expr parseLogicalAndExpr()
+	{
+		return parseBinaryExpr!(parseOrExpr, `&&`);
+	}
+
+	Expr parseLogicalOrExpr()
+	{
+		return parseBinaryExpr!(parseLogicalAndExpr, `||`);
+	}
+
+	/*
+	conditional-expression:
+		logical-OR-expression
+		logical-OR-expression ? expression : conditional-expression
+	*/
+	Expr parseCondExpr()
+	{
+		auto cond = parseLogicalOrExpr();
+		auto qtok = match!`?`;
+		if (!qtok)
+			return cond;
+		auto e1 = parseExpr();
+		expect!`:`;
+		auto e2 = parseCondExpr();
+		return new ConditionalExpression(qtok.location, cond, e1, e2);
+	}
+
+	/*
+	assignment-expression:
+		conditional-expression
+		unary-expression assignment-operator assignment-expression
+
+	assignment-operator: one of
+		= *= /= %= += -= <<= >>= &= ^= |=
+
+	expression:
+		assignment-expression
+		expression , assignment-expression
+
+	constant-expression:
+		conditional-expression
+	*/
+	Expr parseAssignExpr()
+	{
+		return parseBinaryExpr!(parseCondExpr, `= *= /= %= += -= <<= >>= &= ^= |=`);
+	}
+
+	Expr parseExpr()
+	{
+		return parseBinaryExpr!(parseAssignExpr, `,`);
+	}
+
+	alias parseConstantExpr = parseCondExpr;
+
 	/+
-	AssignmentExpression < UnaryExpression AssignmentOperator AssignmentExpression
-		/ ConditionalExpression
-	+/
-
-	/+
-	AssignmentOperator <- "=" / "*=" / "/=" / "%=" / "+=" / "-=" / "<<=" / ">>=" / "&=" / "^=" / "|="
-	+/
-
-	/+
-	Expression < AssignmentExpression (',' AssignmentExpression)*
-	+/
-
-	/+
-	ConstantExpression <- ConditionalExpression
-	+/
-
-	Expression parseExpression(ref const(Token)[] input)
-	{
-		return parseConditionalExpression(input);
-	}
-
 	// 6.7.2.2
 	EnumDeclaration parseEnumSpecifier(ref const(Token)[] input)
 	{
@@ -1262,13 +1202,21 @@ struct Parser {
 		ref_input = input;
 		return type;
 	}
+	+/
+
+	Type parseTypeName()
+	{
+		expect!`int unsigned`();
+		return m_bt.get!"int";
+	}
+
 }
 
 version(unittest)
 {
 	Expression expr(string source)
 	{
-		return parse!"Expression"(source);
+		return parse!"Expr"(source);
 	}
 
 	auto parse(string what)(string source, TokenKind[] remainder...)
@@ -1284,9 +1232,10 @@ version(unittest)
 			.filter!(t => t.kind != tk!`space` && t.kind != tk!`newline`)
 			.map!(t => t.ppTokenToToken)
 			.array;
-		auto result = mixin("Parser().parse" ~ what ~ "(tokens)");
+		auto parser = Parser(tokens);
+		auto result = mixin("parser.parse" ~ what ~ "()");
 		assertEqual(
-			tokens.map!(t => t.kind),
+			parser.m_input.map!(t => t.kind),
 			chain(remainder, only(tk!`eof`)));
 		return result;
 	}
@@ -1417,6 +1366,7 @@ unittest
 		});
 }
 
+version(none)
 unittest
 {
 	crtest!("enum without enumerator list",
@@ -1475,6 +1425,7 @@ unittest
 		});
 }
 
+version(none)
 unittest
 {
 	crtest!("parse type qualifiers",
@@ -1655,6 +1606,7 @@ unittest
 		});
 }
 
+version(none)
 unittest
 {
 	crtest!("parse declarators with pointers and qualifiers",
@@ -1700,6 +1652,7 @@ unittest
 		});
 }
 
+version(none)
 unittest
 {
 	crtest!("parse type name",
