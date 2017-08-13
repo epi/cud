@@ -183,10 +183,10 @@ class ConstantArrayType : ArrayType
 
 class VariableArrayType : ArrayType
 {
-	import cud.parse : Expression;
-	Expression size;
+	import cud.expr : Expr;
+	Expr size;
 
-	this(Type element_type, Expression size)
+	this(Type element_type, Expr size)
 	{
 		super(element_type);
 		this.size = size;

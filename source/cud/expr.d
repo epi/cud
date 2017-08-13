@@ -16,12 +16,10 @@ class Expr
 		this.lvalue = lvalue;
 	}
 
-	abstract void accept(ExpressionVisitor ev);
+	abstract void accept(ExprVisitor ev);
 }
 
-deprecated alias Expression = Expr;
-
-class IntegerConstant : Expr
+class IntConst : Expr
 {
 	long value;
 
@@ -31,61 +29,61 @@ class IntegerConstant : Expr
 		this.value = value;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class IndexExpression : Expression
+class IndexExpr : Expr
 {
-	Expression indexed;
-	Expression index;
+	Expr indexed;
+	Expr index;
 
-	this(Location location, Expression indexed, Expression index)
+	this(Location location, Expr indexed, Expr index)
 	{
 		super(location, null, true);
 		this.indexed = indexed;
 		this.index = index;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class CallExpression : Expression
+class CallExpr : Expr
 {
-	Expression callee;
-	Expression[] arguments;
+	Expr callee;
+	Expr[] arguments;
 
-	this(Location location, Expression callee, Expression[] args)
+	this(Location location, Expr callee, Expr[] args)
 	{
 		super(location, null, true);
 		this.callee = callee;
 		this.arguments = args;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class UnaryExpression : Expression
+class UnaryExpr : Expr
 {
-	Expression operand;
+	Expr operand;
 	TokenKind unaryOp;
 
-	this(Location location, TokenKind op, Expression sube)
+	this(Location location, TokenKind op, Expr sube)
 	{
 		super(location, null, false);
 		unaryOp = op;
 		operand = sube;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class MemberExpression : Expression
+class MemberExpr : Expr
 {
-	Expression composite;
+	Expr composite;
 	string memberName;
 	bool pointer;
 
-	this(Location location, Expression composite, string member_name, bool pointer)
+	this(Location location, Expr composite, string member_name, bool pointer)
 	{
 		super(location, null, composite.lvalue);
 		this.composite = composite;
@@ -93,7 +91,7 @@ class MemberExpression : Expression
 		this.pointer = pointer;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
 enum TypeTrait
@@ -102,7 +100,7 @@ enum TypeTrait
 	alignof_,
 }
 
-class TypeTraitExpression : Expression
+class TypeTraitExpr : Expr
 {
 	TypeTrait trait;
 	Type theType;
@@ -115,29 +113,29 @@ class TypeTraitExpression : Expression
 		this.theType = type;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class CastExpression : Expression
+class CastExpr : Expr
 {
-	Expression operand;
+	Expr operand;
 
-	this(Location location, Type type, Expression operand)
+	this(Location location, Type type, Expr operand)
 	{
 		super(location, type, false);
 		this.operand = operand;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class BinaryExpression : Expression
+class BinaryExpr : Expr
 {
-	Expression lhs;
-	Expression rhs;
+	Expr lhs;
+	Expr rhs;
 	TokenKind binaryOp;
 
-	this(Location location, TokenKind op, Expression lhs, Expression rhs)
+	this(Location location, TokenKind op, Expr lhs, Expr rhs)
 	{
 		super(location, null, false);
 		this.binaryOp = op;
@@ -145,66 +143,66 @@ class BinaryExpression : Expression
 		this.rhs = rhs;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-class ConditionalExpression : Expression
+class CondExpr : Expr
 {
-	Expression condition;
-	Expression trueExpression;
-	Expression falseExpression;
+	Expr condition;
+	Expr trueExpr;
+	Expr falseExpr;
 
 	this(Location location,
-		Expression condition,
-		Expression trueExpression,
-		Expression falseExpression)
+		Expr condition,
+		Expr trueExpr,
+		Expr falseExpr)
 	{
 		super(location, null, false);
 		this.condition = condition;
-		this.trueExpression = trueExpression;
-		this.falseExpression = falseExpression;
+		this.trueExpr = trueExpr;
+		this.falseExpr = falseExpr;
 	}
 
-	override void accept(ExpressionVisitor ev) { ev.visit(this); }
+	override void accept(ExprVisitor ev) { ev.visit(this); }
 }
 
-interface ExpressionVisitor
+interface ExprVisitor
 {
-	void visit(IntegerConstant expr);
-	void visit(IndexExpression expr);
-	void visit(CallExpression expr);
-	void visit(UnaryExpression expr);
-	void visit(MemberExpression expr);
-	void visit(TypeTraitExpression expr);
-	void visit(CastExpression expr);
-	void visit(BinaryExpression expr);
-	void visit(ConditionalExpression expr);
+	void visit(IntConst expr);
+	void visit(IndexExpr expr);
+	void visit(CallExpr expr);
+	void visit(UnaryExpr expr);
+	void visit(MemberExpr expr);
+	void visit(TypeTraitExpr expr);
+	void visit(CastExpr expr);
+	void visit(BinaryExpr expr);
+	void visit(CondExpr expr);
 }
 
-void print(Expression e)
+void print(Expr e)
 {
 	import std.stdio;
-	e.accept(new class ExpressionVisitor
+	e.accept(new class ExprVisitor
 		{
 			string indent = "";
-			void visit(IntegerConstant expr)
+			void visit(IntConst expr)
 			{
 				writefln("%s%s IntegerConstant!%s %s",
 					indent, expr.location, expr.type.toString(), expr.value);
 			}
 
-			void visit(IndexExpression expr)
+			void visit(IndexExpr expr)
 			{
-				writeln(indent, expr.location, " IndexExpression");
+				writeln(indent, expr.location, " IndexExpr");
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.indexed.accept(this);
 				expr.index.accept(this);
 			}
 
-			void visit(CallExpression expr)
+			void visit(CallExpr expr)
 			{
-				writeln(indent, expr.location, " CallExpression");
+				writeln(indent, expr.location, " CallExpr");
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.callee.accept(this);
@@ -212,41 +210,41 @@ void print(Expression e)
 					a.accept(this);
 			}
 
-			void visit(UnaryExpression expr)
+			void visit(UnaryExpr expr)
 			{
-				writeln(indent, expr.location, " UnaryExpression ", expr.unaryOp);
+				writeln(indent, expr.location, " UnaryExpr ", expr.unaryOp);
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.operand.accept(this);
 			}
 
-			void visit(MemberExpression expr)
+			void visit(MemberExpr expr)
 			{
-				writefln("%s%s MemberExpression %s%s",
+				writefln("%s%s MemberExpr %s%s",
 					indent, expr.location, expr.pointer ? "->" : ".", expr.memberName);
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.composite.accept(this);
 			}
 
-			void visit(TypeTraitExpression expr)
+			void visit(TypeTraitExpr expr)
 			{
-				writefln("%s%s TypeTraitExpression %s %s",
+				writefln("%s%s TypeTraitExpr %s %s",
 					indent, expr.location, expr.trait, typeid(expr.type));
 			}
 
-			void visit(CastExpression expr)
+			void visit(CastExpr expr)
 			{
-				writefln("%s%s CastExpression %s",
+				writefln("%s%s CastExpr %s",
 					indent, expr.location, typeid(expr.type));
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.operand.accept(this);
 			}
 
-			void visit(BinaryExpression expr)
+			void visit(BinaryExpr expr)
 			{
-				writefln("%s%s BinaryExpression %s",
+				writefln("%s%s BinaryExpr %s",
 					indent, expr.location, expr.binaryOp);
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
@@ -254,15 +252,15 @@ void print(Expression e)
 				expr.rhs.accept(this);
 			}
 
-			void visit(ConditionalExpression expr)
+			void visit(CondExpr expr)
 			{
-				writefln("%s%s ConditionalExpression",
+				writefln("%s%s CondExpr",
 					indent, expr.location);
 				indent ~= "  ";
 				scope(exit) indent = indent[0 .. $ - 2];
 				expr.condition.accept(this);
-				expr.trueExpression.accept(this);
-				expr.falseExpression.accept(this);
+				expr.trueExpr.accept(this);
+				expr.falseExpr.accept(this);
 			}
 		});
 }

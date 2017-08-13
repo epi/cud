@@ -34,13 +34,13 @@ class Declaration
 class EnumConstantDeclaration : Declaration
 {
 	string name;
-	Expression expression;
+	Expr expr;
 
-	this(Location location, string name, Expression expression)
+	this(Location location, string name, Expr expr)
 	{
 		super(location);
 		this.name = name;
-		this.expression = expression;
+		this.expr = expr;
 	}
 }
 
@@ -161,7 +161,7 @@ struct Parser {
 		Expr result = {
 			foreach (typestr; AliasSeq!("uint", "int", "long", "ulong", "char")) {
 				if (auto tok = match!(typestr ~ "const")) {
-					return new IntegerConstant(
+					return new IntConst(
 						tok.location,
 						mixin("m_bt." ~ typestr ~ "_"),
 						tok.longValue);
@@ -181,7 +181,7 @@ struct Parser {
 			if (auto tok = match!`[`) {
 				auto e = parseExpr();
 				expect!`]`;
-				result = new IndexExpression(tok.location, result, e);
+				result = new IndexExpr(tok.location, result, e);
 			} else if (auto tok = match!`(`) {
 				Expr[] args;
 				if (!match!`)`) {
@@ -192,13 +192,13 @@ struct Parser {
 						expect!`,`;
 					}
 				}
-				result = new CallExpression(tok.location, result, args);
+				result = new CallExpr(tok.location, result, args);
 			} else if (auto tok = match!`. ->`) {
 				auto ident = expect!`identifier`;
-				result = new MemberExpression(
+				result = new MemberExpr(
 					tok.location, result, ident.spelling, tok.kind == tk!`->`);
 			} else if (auto tok = match!`++ --`) {
-				result = new UnaryExpression(
+				result = new UnaryExpr(
 					tok.location,
 					tok.kind == tk!`++` ? tk!`post++` : tk!`post--`,
 					result);
@@ -225,18 +225,18 @@ struct Parser {
 	Expr parseUnaryExpr()
 	{
 		if (auto op = match!`++ --`) {
-			return new UnaryExpression(op.location, op.kind, parseUnaryExpr());
+			return new UnaryExpr(op.location, op.kind, parseUnaryExpr());
 		} else if (auto op = match!`& * + - ~ !`) {
-			return new UnaryExpression(op.location, op.kind, parseCastExpr());
+			return new UnaryExpr(op.location, op.kind, parseCastExpr());
 		} else if (auto op = match!`sizeof`) {
 			if (auto lparen = match!`(`) {
 				Type t = peekTypeName()
 					? parseTypeName()
 					: parseExpr().type;
 				expect!`)`;
-				return new TypeTraitExpression(op.location, TypeTrait.sizeof_, t);
+				return new TypeTraitExpr(op.location, TypeTrait.sizeof_, t);
 			} else {
-				return new TypeTraitExpression(
+				return new TypeTraitExpr(
 					op.location, TypeTrait.sizeof_, parseExpr().type);
 			}
 		} else if (auto op = match!`_Alignof`) {
@@ -269,7 +269,7 @@ struct Parser {
 				Type t = parseTypeName();
 				expect!`)`;
 				// TODO: compound literal
-				return new CastExpression(lparen.location, t, parseCastExpr());
+				return new CastExpr(lparen.location, t, parseCastExpr());
 			} else {
 				Expr e = parseExpr();
 				expect!`)`;
@@ -285,7 +285,7 @@ struct Parser {
 		Expr e = subparser();
 		for (;;) {
 			if (auto tok = match!tokenKinds)
-				e = new BinaryExpression(tok.location, tok.kind, e, subparser());
+				e = new BinaryExpr(tok.location, tok.kind, e, subparser());
 			else
 				break;
 		}
@@ -356,7 +356,7 @@ struct Parser {
 		auto e1 = parseExpr();
 		expect!`:`;
 		auto e2 = parseCondExpr();
-		return new ConditionalExpression(qtok.location, cond, e1, e2);
+		return new CondExpr(qtok.location, cond, e1, e2);
 	}
 
 	/*
@@ -443,7 +443,7 @@ struct Parser {
 		enum iqual = staticIndexOf!(Qualifiers, Ts);
 		enum istc = staticIndexOf!(StorageClass, Ts);
 		enum ifunc = staticIndexOf!(FunctionSpecifiers, Ts);
-		enum ialign = staticIndexOf!(Expression, Ts);
+		enum ialign = staticIndexOf!(Expr, Ts);
 
 		Token[tk!`max_keyword`] tokens;
 		bool longlong;
@@ -498,7 +498,7 @@ struct Parser {
 					expect!`(`;
 					result[ialign] = peekExpr()
 						? parseConstantExpr()
-						: new TypeTraitExpression(
+						: new TypeTraitExpr(
 							tok.location,
 							TypeTrait.alignof_,
 							parseTypeName());
@@ -674,12 +674,12 @@ struct Parser {
 				assert(0);
 			}
 			string name = id_tok.spelling;
-			Expression expr;
+			Expr expr;
 			temp_input.popFront;
 			tok = temp_input.front;
 			if (tok.kind == tk!`=`) {
 				temp_input.popFront;
-				expr = parseConditionalExpression(temp_input);
+				expr = parseConditionalExpr(temp_input);
 				if (!expr) {
 					error(temp_input.front.location,
 						"expected expression, not '%s'",
@@ -775,7 +775,7 @@ struct Parser {
 				Token _Noreturn_;
 
 				Token _Alignas_;
-				Expression[] alignment;
+				Expr[] alignment;
 			}
 		}
 
@@ -959,7 +959,7 @@ struct Parser {
 						assert(0);
 					}
 					input.popFront;
-					Expression expr = parseConditionalExpression(input);
+					Expr expr = parseConditionalExpr(input);
 					if (!expr) {
 						Type type = parseTypeName(input);
 						if (!type) {
@@ -967,7 +967,7 @@ struct Parser {
 								"expected constant expression or type name");
 							assert(0);
 						}
-						expr = new TypeTraitExpression(tok.location, TypeTrait.alignof_, type);
+						expr = new TypeTraitExpr(tok.location, TypeTrait.alignof_, type);
 					}
 					spec.alignment ~= expr;
 					if (input.front.kind != tk!`)`) {
@@ -1069,12 +1069,12 @@ struct Parser {
 				ref_input.popFront;
 				static_ = true;
 			}
-			Expression expr;
+			Expr expr;
 			if (!static_ && ref_input.front.kind == tk!`*`) {
 				ref_input.popFront;
 				vla_ = true;
 			} else if (ref_input.front.kind != tk!`]`) {
-				expr = parseAssignmentExpression(ref_input);
+				expr = parseAssignmentExpr(ref_input);
 				if (!expr)
 					error(ref_input.front.location,
 						"Expected assignment expression");
@@ -1207,7 +1207,7 @@ struct Parser {
 
 version(unittest)
 {
-	Expression expr(string source)
+	Expr expr(string source)
 	{
 		return parse!"Expr"(source);
 	}
@@ -1234,30 +1234,30 @@ version(unittest)
 	}
 }
 
-unittest // primaryExpression
+unittest // primaryExpr
 {
 	crtest!("valid integer constants are parsed with types matching the specification",
 		() {
-			if (auto e = expr("0").as!IntegerConstant) {
+			if (auto e = expr("0").as!IntConst) {
 				assert(e.value == 0);
 				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
 			}
-			if (auto e = expr("42l").as!IntegerConstant) {
+			if (auto e = expr("42l").as!IntConst) {
 				assert(e.value == 42);
 				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.long_);
 			}
-			if (auto e = expr("0777u").as!IntegerConstant) {
+			if (auto e = expr("0777u").as!IntConst) {
 				assert(e.value == 0x1ff);
 				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.uint_);
 			}
-			if (auto e = expr("1337ull").as!IntegerConstant) {
+			if (auto e = expr("1337ull").as!IntConst) {
 				assert(e.value == 1337);
 				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.ulong_);
 			}
 		});
 	crtest!("parenthesized constant",
 		() {
-			if (auto e = expr("(42)").as!IntegerConstant) {
+			if (auto e = expr("(42)").as!IntConst) {
 				assert(e.value == 42);
 				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
 			}
@@ -1268,94 +1268,94 @@ unittest
 {
 	crtest!("can nest postfix operators",
 		() {
-			auto e = expr("1[42]()(2, 3)->a.b++").as!UnaryExpression;
+			auto e = expr("1[42]()(2, 3)->a.b++").as!UnaryExpr;
 			assert(e.unaryOp == tk!`post++`);
-			auto e1 = e.operand.as!MemberExpression;
+			auto e1 = e.operand.as!MemberExpr;
 			assert(e1.memberName == "b");
 			assert(!e1.pointer);
-			auto c0 = e1.composite.as!MemberExpression;
+			auto c0 = e1.composite.as!MemberExpr;
 			assert(c0.memberName == "a");
 			assert(c0.pointer);
-			auto c1 = c0.composite.as!CallExpression;
+			auto c1 = c0.composite.as!CallExpr;
 			assert(c1.arguments.length == 2);
-			assert(c1.arguments[0].as!IntegerConstant.value == 2);
-			assert(c1.arguments[1].as!IntegerConstant.value == 3);
-			auto c2 = c1.callee.as!CallExpression;
+			assert(c1.arguments[0].as!IntConst.value == 2);
+			assert(c1.arguments[1].as!IntConst.value == 3);
+			auto c2 = c1.callee.as!CallExpr;
 			assert(c2.arguments.length == 0);
-			auto ind = c2.callee.as!IndexExpression;
-			assert(ind.indexed.as!IntegerConstant.value == 1);
-			assert(ind.index.as!IntegerConstant.value == 42);
+			auto ind = c2.callee.as!IndexExpr;
+			assert(ind.indexed.as!IntConst.value == 1);
+			assert(ind.index.as!IntConst.value == 42);
 		});
 
 	crtest!("binary operators are left-associative",
 		() {
-			auto e = expr("1 + 2 * 3 % 4 / 5 + 6").as!BinaryExpression;
+			auto e = expr("1 + 2 * 3 % 4 / 5 + 6").as!BinaryExpr;
 			assert(e.binaryOp == tk!`+`);
-			assert(e.rhs.as!IntegerConstant.value == 6);
-			auto add = e.lhs.as!BinaryExpression;
+			assert(e.rhs.as!IntConst.value == 6);
+			auto add = e.lhs.as!BinaryExpr;
 			assert(add.binaryOp == tk!`+`);
-			assert(add.lhs.as!IntegerConstant.value == 1);
-			auto div = add.rhs.as!BinaryExpression;
+			assert(add.lhs.as!IntConst.value == 1);
+			auto div = add.rhs.as!BinaryExpr;
 			assert(div.binaryOp == tk!`/`);
-			assert(div.rhs.as!IntegerConstant.value == 5);
-			auto rem = div.lhs.as!BinaryExpression;
+			assert(div.rhs.as!IntConst.value == 5);
+			auto rem = div.lhs.as!BinaryExpr;
 			assert(rem.binaryOp == tk!`%`);
-			assert(rem.rhs.as!IntegerConstant.value == 4);
-			auto mul = rem.lhs.as!BinaryExpression;
+			assert(rem.rhs.as!IntConst.value == 4);
+			auto mul = rem.lhs.as!BinaryExpr;
 			assert(mul.binaryOp == tk!`*`);
-			assert(mul.rhs.as!IntegerConstant.value == 3);
-			assert(mul.lhs.as!IntegerConstant.value == 2);
+			assert(mul.rhs.as!IntConst.value == 3);
+			assert(mul.lhs.as!IntConst.value == 2);
 		});
 
 	crtest!("prefix operators can be nested",
 		() {
-			auto c = expr("(int)--*&1").as!CastExpression;
-			auto mm = c.operand.as!UnaryExpression;
+			auto c = expr("(int)--*&1").as!CastExpr;
+			auto mm = c.operand.as!UnaryExpr;
 			assert(mm.unaryOp == tk!`--`);
-			auto ind = mm.operand.as!UnaryExpression;
+			auto ind = mm.operand.as!UnaryExpr;
 			assert(ind.unaryOp == tk!`*`);
-			auto ad = ind.operand.as!UnaryExpression;
+			auto ad = ind.operand.as!UnaryExpr;
 			assert(ad.unaryOp == tk!`&`);
-			assert(ad.operand.as!IntegerConstant.value == 1);
+			assert(ad.operand.as!IntConst.value == 1);
 		});
 
 	crtest!("?: is parsed alone",
 		() {
-			auto e = expr("1 ? 2 : 3").as!ConditionalExpression;
-			assert(e.condition.as!IntegerConstant.value == 1);
-			assert(e.trueExpression.as!IntegerConstant.value == 2);
-			assert(e.falseExpression.as!IntegerConstant.value == 3);
+			auto e = expr("1 ? 2 : 3").as!CondExpr;
+			assert(e.condition.as!IntConst.value == 1);
+			assert(e.trueExpr.as!IntConst.value == 2);
+			assert(e.falseExpr.as!IntConst.value == 3);
 		});
 
 	crtest!("?: has lower priority than ||",
 		() {
-			auto e = expr("1 || 2 ? 3 || 4 : 5 || 6").as!ConditionalExpression;
-			auto ce = e.condition.as!BinaryExpression;
+			auto e = expr("1 || 2 ? 3 || 4 : 5 || 6").as!CondExpr;
+			auto ce = e.condition.as!BinaryExpr;
 			assert(ce.binaryOp == tk!`||`);
-			assert(ce.lhs.as!IntegerConstant.value == 1);
-			assert(ce.rhs.as!IntegerConstant.value == 2);
-			auto te = e.trueExpression.as!BinaryExpression;
+			assert(ce.lhs.as!IntConst.value == 1);
+			assert(ce.rhs.as!IntConst.value == 2);
+			auto te = e.trueExpr.as!BinaryExpr;
 			assert(te.binaryOp == tk!`||`);
-			assert(te.lhs.as!IntegerConstant.value == 3);
-			assert(te.rhs.as!IntegerConstant.value == 4);
-			auto fe = e.falseExpression.as!BinaryExpression;
+			assert(te.lhs.as!IntConst.value == 3);
+			assert(te.rhs.as!IntConst.value == 4);
+			auto fe = e.falseExpr.as!BinaryExpr;
 			assert(fe.binaryOp == tk!`||`);
-			assert(fe.lhs.as!IntegerConstant.value == 5);
-			assert(fe.rhs.as!IntegerConstant.value == 6);
+			assert(fe.lhs.as!IntConst.value == 5);
+			assert(fe.rhs.as!IntConst.value == 6);
 		});
 
 	crtest!("?: is right-associative",
 		() {
-			auto e = expr("1 ? 2 : 3 ? 4 : 5 ? 6 : 7").as!ConditionalExpression;
-			assert(e.condition.as!IntegerConstant.value == 1);
-			assert(e.trueExpression.as!IntegerConstant.value == 2);
-			auto e1 = e.falseExpression.as!ConditionalExpression;
-			assert(e1.condition.as!IntegerConstant.value == 3);
-			assert(e1.trueExpression.as!IntegerConstant.value == 4);
-			auto e2 = e1.falseExpression.as!ConditionalExpression;
-			assert(e2.condition.as!IntegerConstant.value == 5);
-			assert(e2.trueExpression.as!IntegerConstant.value == 6);
-			assert(e2.falseExpression.as!IntegerConstant.value == 7);
+			auto e = expr("1 ? 2 : 3 ? 4 : 5 ? 6 : 7").as!CondExpr;
+			assert(e.condition.as!IntConst.value == 1);
+			assert(e.trueExpr.as!IntConst.value == 2);
+			auto e1 = e.falseExpr.as!CondExpr;
+			assert(e1.condition.as!IntConst.value == 3);
+			assert(e1.trueExpr.as!IntConst.value == 4);
+			auto e2 = e1.falseExpr.as!CondExpr;
+			assert(e2.condition.as!IntConst.value == 5);
+			assert(e2.trueExpr.as!IntConst.value == 6);
+			assert(e2.falseExpr.as!IntConst.value == 7);
 		});
 }
 
@@ -1393,9 +1393,9 @@ unittest
 			assert(e.list[0].name == "bar");
 			assert(e.list[0].expression is null);
 			assert(e.list[1].name == "baz");
-			assert(e.list[1].expression.as!IntegerConstant.value == 13);
+			assert(e.list[1].expression.as!IntConst.value == 13);
 			assert(e.list[2].name == "quux");
-			assert(e.list[2].expression.as!IntegerConstant.value == 42);
+			assert(e.list[2].expression.as!IntConst.value == 42);
 		});
 
 	crtest!("malformed enum spec",
@@ -1448,8 +1448,8 @@ unittest
 			assert(sq._Alignas_);
 			assert(sq.const_);
 			assert(sq.alignment.length == 2);
-			assert(sq.alignment[0].as!IntegerConstant.value == 16);
-			auto tt = sq.alignment[1].as!TypeTraitExpression;
+			assert(sq.alignment[0].as!IntConst.value == 16);
+			auto tt = sq.alignment[1].as!TypeTraitExpr;
 			assert(tt.trait == TypeTrait.alignof_);
 			assert(tt.theType.as!BuiltinType.kind == BuiltinType.kind.int_);
 			assert(!sq.restrict_);
