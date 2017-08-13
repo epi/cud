@@ -16,18 +16,19 @@ class Type
 
 struct BuiltinTypes
 {
-	BuiltinType[BuiltinType.Kind.max + 1] types;
-
-	BuiltinType get(string s)()
-	{
-		return types[mixin("BuiltinType.Kind." ~ s ~ "_")];
-	}
+	mixin({
+			string result;
+			foreach (ms; __traits(allMembers, BuiltinType.Kind)) {
+				result ~= "BuiltinType " ~ ms ~ ";";
+			}
+			return result;
+		}());
 
 	void initialize()
 	{
 		foreach (ms; __traits(allMembers, BuiltinType.Kind)) {
-			types[mixin("BuiltinType.Kind." ~ ms)] =
-				new BuiltinType(mixin("BuiltinType.Kind." ~ ms));
+			auto bt = new BuiltinType(mixin("BuiltinType.Kind." ~ ms));
+			mixin("this." ~ ms ~ " = bt;");
 		}
 	}
 }
@@ -89,28 +90,45 @@ class AtomicType : Type
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
 }
 
-enum Qualifiers : uint
+struct FunctionSpecifiers
 {
-	none                   = 0,
-	volatile_              = 1 << 0,
-	restrict_              = 1 << 1,
-	restrictVolatile_      = restrict_ | volatile_,
-	const_                 = 1 << 2,
-	constVolatile_         = const_ | volatile_,
-	constRestrict_         = const_ | restrict_,
-	constRestrictVolatile_ = const_ | restrict_ | volatile_,
+	bool inline_;
+	bool _Noreturn_;
+}
+
+struct StorageClass
+{
+	bool typedef_;
+	bool extern_;
+	bool static_;
+	bool _Thread_local_;
+	bool auto_;
+	bool register_;
+}
+
+struct Qualifiers
+{
+	bool const_;
+	bool volatile_;
+	bool restrict_;
+
+	@property bool any() pure nothrow const @safe @nogc
+	{
+		return const_ | volatile_ | restrict_;
+	}
+
+	alias any this; // implicit conversion to bool
 }
 
 class QualifiedType : Type
 {
 	Type underlyingType;
-	uint qualifiers;
+	Qualifiers qualifiers;
 
-	this(Type type, Qualifiers[] qualifiers...)
+	this(Type type, Qualifiers qualifiers)
 	{
-		foreach (q; qualifiers)
-			this.qualifiers |= q;
 		this.underlyingType = type;
+		this.qualifiers = qualifiers;
 	}
 
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
@@ -128,15 +146,49 @@ class PointerType : Type
 	override void accept(TypeVisitor visitor) { visitor.visit(this); }
 }
 
-class ArrayType : Type
+abstract class ArrayType : Type
+{
+	Type elementType;
+
+	this(Type element_type)
+	{
+		this.elementType = element_type;
+	}
+
+	override void accept(TypeVisitor visitor) { import std.stdio; writeln("A??A? ", typeid(this)); }
+}
+
+class IncompleteArrayType : ArrayType
+{
+	this(Type element_type)
+	{
+		super(element_type);
+	}
+
+	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+}
+
+class ConstantArrayType : ArrayType
+{
+	ulong size;
+
+	this(Type element_type, ulong size)
+	{
+		super(element_type);
+		this.size = size;
+	}
+
+	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+}
+
+class VariableArrayType : ArrayType
 {
 	import cud.parse : Expression;
-	Type elementType;
 	Expression size;
 
 	this(Type element_type, Expression size)
 	{
-		this.elementType = element_type;
+		super(element_type);
 		this.size = size;
 	}
 
@@ -145,7 +197,9 @@ class ArrayType : Type
 
 interface TypeVisitor
 {
-	void visit(ArrayType);
+	void visit(IncompleteArrayType);
+	void visit(ConstantArrayType);
+	void visit(VariableArrayType);
 	// void visit(StructType);
 	// void visit(UnionType);
 	// void visit(FunctionType);
@@ -158,16 +212,15 @@ interface TypeVisitor
 void format(Type t, scope void delegate(in char[]) dg)
 {
 	if (!t) {
-		dg("0");
+		dg("(null)");
 		return;
 	}
 	t.accept(new class TypeVisitor
 		{
 			void visit(AtomicType type)
 			{
-				dg("_Atomic(");
+				dg("_Atomic ");
 				format(type.underlyingType, dg);
-				dg(")");
 			}
 
 			void visit(BuiltinType type)
@@ -181,35 +234,38 @@ void format(Type t, scope void delegate(in char[]) dg)
 				import std.meta : AliasSeq;
 				bool printed_something;
 				foreach (q; AliasSeq!("const", "restrict", "volatile")) {
-					if (type.qualifiers & mixin("Qualifiers." ~ q ~ "_")) {
+					if (mixin("type.qualifiers." ~ q ~ "_")) {
 						if (printed_something)
 							dg(" ");
 						dg(q);
 						printed_something = true;
 					}
 				}
-				dg("(");
 				format(type.underlyingType, dg);
-				dg(")");
 			}
 
 			void visit(PointerType type)
 			{
-				dg("ptr(");
+				dg("ptr ");
 				format(type.pointeeType, dg);
-				dg(")");
 			}
 
-			void visit(ArrayType type)
+			void visit(IncompleteArrayType type)
 			{
-				dg("array[");
-				if (type.size)
-					dg("3");
-				else
-					dg("*");
-				dg("](");
+				dg("array[] ");
 				format(type.elementType, dg);
-				dg(")");
+			}
+
+			void visit(ConstantArrayType type)
+			{
+				dg("array[3] ");
+				format(type.elementType, dg);
+			}
+
+			void visit(VariableArrayType type)
+			{
+				dg("array[*] ");
+				format(type.elementType, dg);
 			}
 		});
 }

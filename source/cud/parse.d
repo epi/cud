@@ -334,55 +334,64 @@ struct Parser {
 		return m_input[0];
 	}
 
-	void next() nothrow @nogc
-	{
-		m_input = m_input[1 .. $];
-	}
-
-	auto match(string token_kinds)()
+	Token match(string token_kinds)()
 	{
 		const tok = m_input.front;
+		switch (tok.kind) {
 		foreach (k; tks!token_kinds) {
-			if (tok.kind == k) {
-				m_input.popFront;
+		case k:
+			m_input.popFront;
+			return tok;
+		}
+		default:
+			return Token.init;
+		}
+	}
+
+	Token peek(token_kinds...)()
+	{
+		import std.meta : aliasSeqOf;
+		foreach (i, ks; token_kinds) {
+			const tok = m_input[i];
+			switch (tok.kind) {
+			foreach (k; tks!ks) {
+			case k:
 				return tok;
 			}
-		}
-		return Token.init;
-	}
-
-	auto peek(string token_kinds)()
-	{
-		const tok = m_input.front;
-		foreach (k; tks!token_kinds) {
-			if (tok.kind == k)
-				return tok;
-		}
-		return Token.init;
-	}
-
-	auto expect(string token_kinds)()
-	{
-		const tok = m_input.front;
-		foreach (k; tks!token_kinds) {
-			if (tok.kind == k) {
-				m_input.popFront;
-				return tok;
+			default:
+				return Token.init;
 			}
 		}
-		error(tok.location, "Expected " ~ token_kinds);
+	}
+
+	Token expect(string token_kinds)()
+	{
+		if (const tok = match!token_kinds)
+			return tok;
+		error(m_input[0].location, "Expected " ~ token_kinds ~
+			", not " ~ m_input[0].spelling);
 		assert(0);
 	}
 
-	// returns true if the front token starts an expression
-	bool peekExpr()
+	// returns true if the front token starts a type name
+	bool peekTypeName()
 	{
-		if (peek!`- & * + ~ ! -- ++ sizeof intconst uintconst longconst ulongconst`)
-			return true;
-		else if (auto tok = peek!`identifier`)
-			return isVariable(tok.spelling);
-		else
+		import std.meta : AliasSeq;
+		alias type_specifier_tokens = AliasSeq!(
+			tks!`void char short int long float double signed unsigned`,
+			tks!`_Bool _Complex`,
+			tks!`_Atomic struct union enum`);
+
+		const tok = m_input[0];
+		switch (tok.kind) {
+		foreach (k; type_specifier_tokens) {
+		case k: return true;
+		}
+		case tk!`identifier`:
+			return isType(tok.spelling);
+		default:
 			return false;
+		}
 	}
 
 	/*
@@ -416,7 +425,7 @@ struct Parser {
 				if (auto tok = match!(typestr ~ "const")) {
 					return new IntegerConstant(
 						tok.location,
-						m_bt.get!typestr,
+						mixin("m_bt." ~ typestr ~ "_"),
 						tok.longValue);
 				}
 			}
@@ -483,9 +492,9 @@ struct Parser {
 			return new UnaryExpression(op.location, op.kind, parseCastExpr());
 		} else if (auto op = match!`sizeof`) {
 			if (auto lparen = match!`(`) {
-				Type t = peekExpr()
-					? parseExpr().type
-					: parseTypeName();
+				Type t = peekTypeName()
+					? parseTypeName()
+					: parseExpr().type;
 				expect!`)`;
 				return new TypeTraitExpression(op.location, TypeTrait.sizeof_, t);
 			} else {
@@ -504,6 +513,12 @@ struct Parser {
 		return true;
 	}
 
+	bool isType(string ident)
+	{
+		// TODO
+		return true;
+	}
+
 	/*
 	cast-expression:
 		unary-expression
@@ -512,19 +527,15 @@ struct Parser {
 	Expr parseCastExpr()
 	{
 		if (auto lparen = match!`(`) {
-			if (peek!`(`) {
-				Expr e = parseCastExpr();
-				expect!`)`;
-				return e;
-			} else if (peekExpr()) {
-				Expr e = parseExpr();
-				expect!`)`;
-				return e;
-			} else {
+			if (peekTypeName()) {
 				Type t = parseTypeName();
 				expect!`)`;
 				// TODO: compound literal
 				return new CastExpression(lparen.location, t, parseCastExpr());
+			} else {
+				Expr e = parseExpr();
+				expect!`)`;
+				return e;
 			}
 		} else {
 			return parseUnaryExpr();
@@ -636,6 +647,256 @@ struct Parser {
 	}
 
 	alias parseConstantExpr = parseCondExpr;
+
+	static immutable TokenKind[][tk!`max_keyword`] conflicts =
+	{
+		TokenKind[][tk!`max_keyword`] result;
+
+
+		return result;
+	}();
+
+	Type typeFromTokens(ref Token[tk!`max_keyword`] tokens, bool longlong)
+	{
+		if (tokens[tk!`void`])
+			return m_bt.void_;
+		if (tokens[tk!`_Bool`])
+			return m_bt.bool_;
+		if (tokens[tk!`_Complex`]) {
+			if (tokens[tk!`float`])
+				return m_bt.float_Complex_;
+			if (tokens[tk!`double`])
+				return tokens[tk!`long`] ? m_bt.longdouble_Complex_
+					: m_bt.double_Complex_;
+		}
+		if (tokens[tk!`float`])
+			return m_bt.float_;
+		if (tokens[tk!`double`])
+			return tokens[tk!`long`] ? m_bt.longdouble_
+				: m_bt.double_;
+		if (tokens[tk!`char`])
+			return tokens[tk!`signed`] ? m_bt.schar_
+				: tokens[tk!`unsigned`] ? m_bt.uchar_
+				: m_bt.char_;
+		if (tokens[tk!`short`])
+			return tokens[tk!`signed`] ? m_bt.sshort_
+				: tokens[tk!`unsigned`] ? m_bt.ushort_
+				: m_bt.short_;
+		if (tokens[tk!`long`]) {
+			if (longlong) {
+				return tokens[tk!`signed`] ? m_bt.slonglong_
+					: tokens[tk!`unsigned`] ? m_bt.ulonglong_
+					: m_bt.longlong_;
+			} else {
+				return tokens[tk!`signed`] ? m_bt.slong_
+					: tokens[tk!`unsigned`] ? m_bt.ulong_
+					: m_bt.long_;
+			}
+		}
+		return tokens[tk!`signed`] ? m_bt.sint_
+			: tokens[tk!`unsigned`] ? m_bt.uint_
+			: m_bt.int_;
+	}
+
+	void parseSpecifiers(Ts...)(out Ts result)
+	{
+		import std.meta : staticIndexOf;
+		enum itype = staticIndexOf!(Type, Ts);
+		enum iqual = staticIndexOf!(Qualifiers, Ts);
+		enum istc = staticIndexOf!(StorageClass, Ts);
+		enum ifunc = staticIndexOf!(FunctionSpecifiers, Ts);
+		enum ialign = staticIndexOf!(Expression, Ts);
+
+		Token[tk!`max_keyword`] tokens;
+		bool longlong;
+
+		for (;;) {
+			static if (iqual >= 0) {
+				if (auto tok = match!`const restrict volatile _Atomic`) {
+					tokens[tok.kind] = tok;
+					static if (itype >= 0) {
+						if (tok.kind == tk!`_Atomic` && match!`(`) {
+							result[itype] =
+								parseTypeName(); // wrap in AtomicType later
+							expect!`)`;
+						}
+					}
+					continue;
+				}
+			}
+
+			static if (itype >= 0) {
+				enum type_specifiers =
+					`void char short int long float double signed unsigned ` ~
+					`_Bool _Complex`;
+				if (auto tok = match!type_specifiers) {
+					// TODO: conflicts
+					tokens[tok.kind] = tok;
+					continue;
+				} else if (auto tok = match!`enum`) {
+					tokens[tok.kind] = tok;
+					result[itype] = parseEnum();
+					continue;
+				} else if (auto tok = match!`struct union`) {
+					tokens[tok.kind] = tok;
+					result[itype] = parseStructOrUnion(tok.kind);
+					continue;
+				} else if (auto tok = match!`identifier`) {
+					// TODO: find typedef
+					assert(0);
+				}
+			}
+
+			static if (istc >= 0 && ifunc >= 0 && ialign >= 0) {
+				enum storage_classes =
+					`typedef extern static _Thread_local auto register ` ~
+					`inline _Noreturn`;
+				if (auto tok = match!storage_classes) {
+					// TODO: conflicts
+					tokens[tok.kind] = tok;
+					continue;
+				} else if (auto tok = match!`_Alignas`) {
+					tokens[tok.kind] = tok;
+					expect!`(`;
+					result[ialign] = peekExpr()
+						? parseConstantExpr()
+						: new TypeTraitExpression(
+							tok.location,
+							TypeTrait.alignof_,
+							parseTypeName());
+					expect!`)`;
+					continue;
+				}
+			}
+			break;
+		}
+
+		static if (iqual >= 0) {
+			result[iqual] = Qualifiers(
+				!!tokens[tk!`const`],
+				!!tokens[tk!`volatile`],
+				!!tokens[tk!`restrict`]);
+		}
+		static if (itype >= 0) {
+			result[itype] = typeFromTokens(tokens, longlong);
+			if (tokens[tk!`_Atomic`])
+				result[itype] = new AtomicType(result[itype]);
+			static if (iqual >= 0) {
+				if (result[iqual])
+					result[itype] = new QualifiedType(result[itype], result[iqual]);
+			}
+		}
+	}
+
+	void skipParens()
+	{
+		int nest;
+		do {
+			if (match!`(`) {
+				nest++;
+			} else if (match!`)`) {
+				nest--;
+			} else if (auto tok = match!`eof ;`) {
+				error(tok.location, "expected ')'");
+				assert(0);
+			} else {
+				m_input = m_input[1 .. $];
+			}
+		} while (nest);
+	}
+
+	/*
+	abstract-declarator:
+		pointer
+		pointer(opt) direct-abstract-declarator
+
+	direct-abstract-declarator:
+		( abstract-declarator )
+		direct-abstract-declarator(opt) [ type-qualifier-list(opt)
+				assignment-expression(opt) ]
+		direct-abstract-declarator(opt) [ static type-qualifier-list(opt)
+				assignment-expression ]
+		direct-abstract-declarator(opt) [ type-qualifier-list static
+				assignment-expression ]
+		direct-abstract-declarator(opt) [ * ]
+		direct-abstract-declarator(opt) ( parameter-type-list(opt) )
+	*/
+	Type parseAbstractDeclarator(Type t)
+	{
+		while (match!`*`) {
+			t = new PointerType(t);
+			Qualifiers q;
+			parseSpecifiers(q);
+			if (q)
+				t = new QualifiedType(t, q);
+		}
+		const(Token)[] paren_decl;
+		if (peek!(`(`, `( [ *`)) {
+			paren_decl = m_input;
+			skipParens();
+		}
+		for (;;) {
+			if (match!`(`) {
+				// TODO: parameter type list
+				expect!`)`;
+			} else if (match!`[`) {
+				if (match!`*`) {
+					// TODO: enforce(inside function prototype)
+					t = new VariableArrayType(t, null);
+				} else {
+					Token static_ = match!`static`;
+					Qualifiers q;
+					parseSpecifiers(q);
+					if (!static_)
+						static_ = match!`static`;
+					// TODO: if (static_) enforce(inside func proto)
+					if (!peek!`]`) {
+						Expr e = parseAssignExpr();
+						// TODO: evaluate e
+						t = new ConstantArrayType(t, 3);
+					} else {
+						t = new IncompleteArrayType(t);
+					}
+				}
+				expect!`]`;
+			} else {
+				break;
+			}
+		}
+
+		if (paren_decl) {
+			import std.algorithm : swap;
+			swap(paren_decl, m_input);
+			expect!`(`;
+			t = parseAbstractDeclarator(t);
+			expect!`)`;
+			swap(paren_decl, m_input);
+		}
+
+		return t;
+	}
+
+	/*
+	type-name:
+		specifier-qualifier-list abstract-declarator(opt)
+	*/
+	Type parseTypeName()
+	{
+		Type result;
+		Qualifiers q;
+		parseSpecifiers(result, q);
+		return parseAbstractDeclarator(result);
+	}
+
+	Type parseEnum()
+	{
+		return null;
+	}
+
+	Type parseStructOrUnion(TokenKind k)
+	{
+		return null;
+	}
 
 	/+
 	// 6.7.2.2
@@ -1204,12 +1465,6 @@ struct Parser {
 	}
 	+/
 
-	Type parseTypeName()
-	{
-		expect!`int unsigned`();
-		return m_bt.get!"int";
-	}
-
 }
 
 version(unittest)
@@ -1652,17 +1907,16 @@ unittest
 		});
 }
 
-version(none)
 unittest
 {
 	crtest!("parse type name",
 		() {
 			foreach (src, type_str; [
 					"int"           : "int",
-					"int *"         : "ptr(int)",
-					"int *[3]"      : "array[3](ptr(int))",
-					"int (*)[3]"    : "ptr(array[3](int))",
-					"int (*)[*]"    : "ptr(array[*](int))",
+					"int *"         : "ptr int",
+					"int *[3]"      : "array[3] ptr int",
+					"int (*)[3]"    : "ptr array[3] int",
+					"int (*)[*]"    : "ptr array[*] int",
 				/+	"int *()"       : "func(?:ptr(int))",
 					"int (*)(void)" : "func(:int)",
 					"int (*const [])(unsigned int, ...)"

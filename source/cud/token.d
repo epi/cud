@@ -52,12 +52,12 @@ template Tokens()
 		`_Generic _Imaginary _Noreturn _Static_assert _Thread_local`).split;
 
 	enum dynamicTokens =
-		(`space newline intconst uintconst longconst ` ~
+		(`max_keyword space newline intconst uintconst longconst ` ~
 		`ulongconst headername identifier ppnumber charconst ` ~
 		`stringliteral notreplacedidentifier placemarker ` ~
 		`post++ post-- macroparam`).split;
 
-	enum allTokens = [`eof`, ``] ~ punctuators ~ keywords ~ dynamicTokens;
+	enum allTokens = [`eof`, ``] ~ keywords ~ punctuators ~ dynamicTokens;
 
 	template tk(string s)
 	{
