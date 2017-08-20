@@ -1230,6 +1230,10 @@ version(unittest)
 		assertEqual(
 			parser.m_input.map!(t => t.kind),
 			chain(remainder, only(tk!`eof`)));
+		if (!__ctfe) {
+			import std.stdio;
+			writeln(result.toString);
+		}
 		return result;
 	}
 }

@@ -74,7 +74,7 @@ template Tokens()
 	}
 }
 
-alias allTokens = Tokens!().allTokens;
+static immutable tokenStrings = Tokens!().allTokens;
 alias tk = Tokens!().tk;
 
 template tks(string s)

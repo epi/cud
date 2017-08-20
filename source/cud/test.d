@@ -42,8 +42,8 @@ private auto prettify(T)(T a)
 {
 	import cud.token : TokenKind;
 	static if (is(T : const(TokenKind))) {
-		import cud.token : allTokens;
-		return allTokens[a];
+		import cud.token : tokenStrings;
+		return tokenStrings[a];
 	} else {
 		return a;
 	}

@@ -1,16 +1,15 @@
 module cud.type;
 
+import cud.visitor : Visitor;
+
 class Type
 {
-	abstract void accept(TypeVisitor);
+	abstract void accept(Visitor);
 
 	override string toString()
 	{
-		import std.array : appender;
-		import std.stdio : writeln;
-		auto app = appender!string;
-		format(this, &app.put!(const(char[])));
-		return app.data;
+		import cud.visitor : tostr = toString;
+		return tostr(this);
 	}
 }
 
@@ -71,7 +70,7 @@ class BuiltinType : Type
 		this.kind = kind;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 enum ty(string t) = mixin("BuiltinType.Kind." ~ t ~ "_");
@@ -87,7 +86,7 @@ class AtomicType : Type
 		this.underlyingType = type;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 struct FunctionSpecifiers
@@ -131,7 +130,7 @@ class QualifiedType : Type
 		this.qualifiers = qualifiers;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 class PointerType : Type
@@ -143,7 +142,7 @@ class PointerType : Type
 		this.pointeeType = type;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 abstract class ArrayType : Type
@@ -155,7 +154,7 @@ abstract class ArrayType : Type
 		this.elementType = element_type;
 	}
 
-	override void accept(TypeVisitor visitor) { import std.stdio; writeln("A??A? ", typeid(this)); }
+	override void accept(Visitor visitor) { import std.stdio; writeln("A??A? ", typeid(this)); }
 }
 
 class IncompleteArrayType : ArrayType
@@ -165,7 +164,7 @@ class IncompleteArrayType : ArrayType
 		super(element_type);
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 class ConstantArrayType : ArrayType
@@ -178,7 +177,7 @@ class ConstantArrayType : ArrayType
 		this.size = size;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }
 
 class VariableArrayType : ArrayType
@@ -192,89 +191,5 @@ class VariableArrayType : ArrayType
 		this.size = size;
 	}
 
-	override void accept(TypeVisitor visitor) { visitor.visit(this); }
-}
-
-interface TypeVisitor
-{
-	void visit(IncompleteArrayType);
-	void visit(ConstantArrayType);
-	void visit(VariableArrayType);
-	// void visit(StructType);
-	// void visit(UnionType);
-	// void visit(FunctionType);
-	void visit(AtomicType);
-	void visit(BuiltinType);
-	void visit(QualifiedType);
-	void visit(PointerType);
-}
-
-void format(Type t, scope void delegate(in char[]) dg)
-{
-	if (!t) {
-		dg("(null)");
-		return;
-	}
-	t.accept(new class TypeVisitor
-		{
-			void visit(AtomicType type)
-			{
-				dg("_Atomic ");
-				format(type.underlyingType, dg);
-			}
-
-			void visit(BuiltinType type)
-			{
-				import std.conv : to;
-				dg(type.kind.to!string[0 .. $ - 1]);
-			}
-
-			void visit(QualifiedType type)
-			{
-				import std.meta : AliasSeq;
-				bool printed_something;
-				foreach (q; AliasSeq!("const", "restrict", "volatile")) {
-					if (mixin("type.qualifiers." ~ q ~ "_")) {
-						if (printed_something)
-							dg(" ");
-						dg(q);
-						printed_something = true;
-					}
-				}
-				format(type.underlyingType, dg);
-			}
-
-			void visit(PointerType type)
-			{
-				dg("ptr ");
-				format(type.pointeeType, dg);
-			}
-
-			void visit(IncompleteArrayType type)
-			{
-				dg("array[] ");
-				format(type.elementType, dg);
-			}
-
-			void visit(ConstantArrayType type)
-			{
-				dg("array[3] ");
-				format(type.elementType, dg);
-			}
-
-			void visit(VariableArrayType type)
-			{
-				dg("array[*] ");
-				format(type.elementType, dg);
-			}
-		});
-}
-
-void print(Type t)
-{
-	import std.array : appender;
-	import std.stdio : writeln;
-	auto app = appender!string;
-	format(t, &app.put!(const(char[])));
-	writeln(app.data);
+	override void accept(Visitor visitor) { visitor.visit(this); }
 }

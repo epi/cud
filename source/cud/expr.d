@@ -2,6 +2,7 @@ module cud.expr;
 
 import cud.token;
 import cud.type;
+import cud.visitor : Visitor;
 
 class Expr
 {
@@ -16,7 +17,13 @@ class Expr
 		this.lvalue = lvalue;
 	}
 
-	abstract void accept(ExprVisitor ev);
+	abstract void accept(Visitor ev);
+
+	override string toString()
+	{
+		import cud.visitor : tostr = toString;
+		return tostr(this);
+	}
 }
 
 class IntConst : Expr
@@ -29,7 +36,7 @@ class IntConst : Expr
 		this.value = value;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class IndexExpr : Expr
@@ -44,7 +51,7 @@ class IndexExpr : Expr
 		this.index = index;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class CallExpr : Expr
@@ -59,7 +66,7 @@ class CallExpr : Expr
 		this.arguments = args;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class UnaryExpr : Expr
@@ -74,7 +81,7 @@ class UnaryExpr : Expr
 		operand = sube;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class MemberExpr : Expr
@@ -91,7 +98,7 @@ class MemberExpr : Expr
 		this.pointer = pointer;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 enum TypeTrait
@@ -113,7 +120,7 @@ class TypeTraitExpr : Expr
 		this.theType = type;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class CastExpr : Expr
@@ -126,7 +133,7 @@ class CastExpr : Expr
 		this.operand = operand;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class BinaryExpr : Expr
@@ -143,7 +150,7 @@ class BinaryExpr : Expr
 		this.rhs = rhs;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
+	override void accept(Visitor ev) { ev.visit(this); }
 }
 
 class CondExpr : Expr
@@ -163,104 +170,5 @@ class CondExpr : Expr
 		this.falseExpr = falseExpr;
 	}
 
-	override void accept(ExprVisitor ev) { ev.visit(this); }
-}
-
-interface ExprVisitor
-{
-	void visit(IntConst expr);
-	void visit(IndexExpr expr);
-	void visit(CallExpr expr);
-	void visit(UnaryExpr expr);
-	void visit(MemberExpr expr);
-	void visit(TypeTraitExpr expr);
-	void visit(CastExpr expr);
-	void visit(BinaryExpr expr);
-	void visit(CondExpr expr);
-}
-
-void print(Expr e)
-{
-	import std.stdio;
-	e.accept(new class ExprVisitor
-		{
-			string indent = "";
-			void visit(IntConst expr)
-			{
-				writefln("%s%s IntegerConstant!%s %s",
-					indent, expr.location, expr.type.toString(), expr.value);
-			}
-
-			void visit(IndexExpr expr)
-			{
-				writeln(indent, expr.location, " IndexExpr");
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.indexed.accept(this);
-				expr.index.accept(this);
-			}
-
-			void visit(CallExpr expr)
-			{
-				writeln(indent, expr.location, " CallExpr");
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.callee.accept(this);
-				foreach (a; expr.arguments)
-					a.accept(this);
-			}
-
-			void visit(UnaryExpr expr)
-			{
-				writeln(indent, expr.location, " UnaryExpr ", expr.unaryOp);
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.operand.accept(this);
-			}
-
-			void visit(MemberExpr expr)
-			{
-				writefln("%s%s MemberExpr %s%s",
-					indent, expr.location, expr.pointer ? "->" : ".", expr.memberName);
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.composite.accept(this);
-			}
-
-			void visit(TypeTraitExpr expr)
-			{
-				writefln("%s%s TypeTraitExpr %s %s",
-					indent, expr.location, expr.trait, typeid(expr.type));
-			}
-
-			void visit(CastExpr expr)
-			{
-				writefln("%s%s CastExpr %s",
-					indent, expr.location, typeid(expr.type));
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.operand.accept(this);
-			}
-
-			void visit(BinaryExpr expr)
-			{
-				writefln("%s%s BinaryExpr %s",
-					indent, expr.location, expr.binaryOp);
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.lhs.accept(this);
-				expr.rhs.accept(this);
-			}
-
-			void visit(CondExpr expr)
-			{
-				writefln("%s%s CondExpr",
-					indent, expr.location);
-				indent ~= "  ";
-				scope(exit) indent = indent[0 .. $ - 2];
-				expr.condition.accept(this);
-				expr.trueExpr.accept(this);
-				expr.falseExpr.accept(this);
-			}
-		});
+	override void accept(Visitor ev) { ev.visit(this); }
 }
