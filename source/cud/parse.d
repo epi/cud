@@ -58,13 +58,13 @@ class EnumDeclaration : Declaration
 }
 
 struct Parser {
-	private BuiltinTypes m_bt;
+	private Target m_target;
 	private const(Token)[] m_input;
 
 	this(const(Token)[] input)
 	{
 		m_input = input;
-		m_bt.initialize();
+		m_target = new Target;
 	}
 
 	@property Token current() pure nothrow const @nogc
@@ -163,7 +163,7 @@ struct Parser {
 				if (auto tok = match!(typestr ~ "const")) {
 					return new IntConst(
 						tok.location,
-						mixin("m_bt." ~ typestr ~ "_"),
+						mixin("m_target." ~ typestr ~ "_"),
 						tok.longValue);
 				}
 			}
@@ -234,10 +234,12 @@ struct Parser {
 					? parseTypeName()
 					: parseExpr().type;
 				expect!`)`;
-				return new TypeTraitExpr(op.location, TypeTrait.sizeof_, t);
+				return new TypeTraitExpr(
+					op.location, m_target.size_t_, TypeTrait.sizeof_, t);
 			} else {
 				return new TypeTraitExpr(
-					op.location, TypeTrait.sizeof_, parseExpr().type);
+					op.location, m_target.size_t_, TypeTrait.sizeof_,
+					parseExpr().type);
 			}
 		} else if (auto op = match!`_Alignof`) {
 			assert(0, "Not implemented");
@@ -397,43 +399,43 @@ struct Parser {
 	Type typeFromTokens(ref Token[tk!`max_keyword`] tokens, bool longlong)
 	{
 		if (tokens[tk!`void`])
-			return m_bt.void_;
+			return m_target.void_;
 		if (tokens[tk!`_Bool`])
-			return m_bt.bool_;
+			return m_target.bool_;
 		if (tokens[tk!`_Complex`]) {
 			if (tokens[tk!`float`])
-				return m_bt.float_Complex_;
+				return m_target.float_Complex_;
 			if (tokens[tk!`double`])
-				return tokens[tk!`long`] ? m_bt.longdouble_Complex_
-					: m_bt.double_Complex_;
+				return tokens[tk!`long`] ? m_target.longdouble_Complex_
+					: m_target.double_Complex_;
 		}
 		if (tokens[tk!`float`])
-			return m_bt.float_;
+			return m_target.float_;
 		if (tokens[tk!`double`])
-			return tokens[tk!`long`] ? m_bt.longdouble_
-				: m_bt.double_;
+			return tokens[tk!`long`] ? m_target.longdouble_
+				: m_target.double_;
 		if (tokens[tk!`char`])
-			return tokens[tk!`signed`] ? m_bt.schar_
-				: tokens[tk!`unsigned`] ? m_bt.uchar_
-				: m_bt.char_;
+			return tokens[tk!`signed`] ? m_target.schar_
+				: tokens[tk!`unsigned`] ? m_target.uchar_
+				: m_target.char_;
 		if (tokens[tk!`short`])
-			return tokens[tk!`signed`] ? m_bt.sshort_
-				: tokens[tk!`unsigned`] ? m_bt.ushort_
-				: m_bt.short_;
+			return tokens[tk!`signed`] ? m_target.sshort_
+				: tokens[tk!`unsigned`] ? m_target.ushort_
+				: m_target.short_;
 		if (tokens[tk!`long`]) {
 			if (longlong) {
-				return tokens[tk!`signed`] ? m_bt.slonglong_
-					: tokens[tk!`unsigned`] ? m_bt.ulonglong_
-					: m_bt.longlong_;
+				return tokens[tk!`signed`] ? m_target.slonglong_
+					: tokens[tk!`unsigned`] ? m_target.ulonglong_
+					: m_target.longlong_;
 			} else {
-				return tokens[tk!`signed`] ? m_bt.slong_
-					: tokens[tk!`unsigned`] ? m_bt.ulong_
-					: m_bt.long_;
+				return tokens[tk!`signed`] ? m_target.slong_
+					: tokens[tk!`unsigned`] ? m_target.ulong_
+					: m_target.long_;
 			}
 		}
-		return tokens[tk!`signed`] ? m_bt.sint_
-			: tokens[tk!`unsigned`] ? m_bt.uint_
-			: m_bt.int_;
+		return tokens[tk!`signed`] ? m_target.sint_
+			: tokens[tk!`unsigned`] ? m_target.uint_
+			: m_target.int_;
 	}
 
 	void parseSpecifiers(Ts...)(out Ts result)
@@ -518,10 +520,10 @@ struct Parser {
 		static if (itype >= 0) {
 			result[itype] = typeFromTokens(tokens, longlong);
 			if (tokens[tk!`_Atomic`])
-				result[itype] = new AtomicType(result[itype]);
+				result[itype] = result[itype].atomic;
 			static if (iqual >= 0) {
 				if (result[iqual])
-					result[itype] = new QualifiedType(result[itype], result[iqual]);
+					result[itype] = result[itype].qualified(result[iqual]);
 			}
 		}
 	}
@@ -562,11 +564,11 @@ struct Parser {
 	Type parseAbstractDeclarator(Type t)
 	{
 		while (match!`*`) {
-			t = new PointerType(t);
+			t = m_target.pointer(t);
 			Qualifiers q;
 			parseSpecifiers(q);
 			if (q)
-				t = new QualifiedType(t, q);
+				t = t.qualified(q);
 		}
 		const(Token)[] paren_decl;
 		if (peek!(`(`, `( [ *`)) {
@@ -580,7 +582,7 @@ struct Parser {
 			} else if (match!`[`) {
 				if (match!`*`) {
 					// TODO: enforce(inside function prototype)
-					t = new VariableArrayType(t, null);
+					t = t.variableArray(null);
 				} else {
 					Token static_ = match!`static`;
 					Qualifiers q;
@@ -591,9 +593,9 @@ struct Parser {
 					if (!peek!`]`) {
 						Expr e = parseAssignExpr();
 						// TODO: evaluate e
-						t = new ConstantArrayType(t, 3);
+						t = t.constantArray(3);
 					} else {
-						t = new IncompleteArrayType(t);
+						t = t.incompleteArray;
 					}
 				}
 				expect!`]`;
@@ -992,32 +994,32 @@ struct Parser {
 	{
 		if (spec.long_long_) {
 			if (spec.signed_)
-				return m_bt.get!`slonglong`;
+				return m_target.get!`slonglong`;
 			else if (spec.unsigned_)
-				return m_bt.get!`ulonglong`;
+				return m_target.get!`ulonglong`;
 			else
-				return m_bt.get!`longlong`;
+				return m_target.get!`longlong`;
 		} else if (spec.long_) {
 			if (spec.signed_)
-				return m_bt.get!`slong`;
+				return m_target.get!`slong`;
 			else if (spec.unsigned_)
-				return m_bt.get!`ulong`;
+				return m_target.get!`ulong`;
 			else
-				return m_bt.get!`long`;
+				return m_target.get!`long`;
 		} else if (spec.short_) {
 			if (spec.signed_)
-				return m_bt.get!`sshort`;
+				return m_target.get!`sshort`;
 			else if (spec.unsigned_)
-				return m_bt.get!`ushort`;
+				return m_target.get!`ushort`;
 			else
-				return m_bt.get!`ulong`;
+				return m_target.get!`ulong`;
 		} else {
 			if (spec.signed_)
-				return m_bt.get!`sint`;
+				return m_target.get!`sint`;
 			else if (spec.unsigned_)
-				return m_bt.get!`uint`;
+				return m_target.get!`uint`;
 			else if (spec.int_ || implicit_int)
-				return m_bt.get!`int`;
+				return m_target.get!`int`;
 		}
 		return null;
 
@@ -1244,26 +1246,26 @@ unittest // primaryExpr
 		() {
 			if (auto e = expr("0").as!IntConst) {
 				assert(e.value == 0);
-				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
+				assert(e.type.as!BuiltinType.ty == Ty.int_);
 			}
 			if (auto e = expr("42l").as!IntConst) {
 				assert(e.value == 42);
-				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.long_);
+				assert(e.type.as!BuiltinType.ty == Ty.long_);
 			}
 			if (auto e = expr("0777u").as!IntConst) {
 				assert(e.value == 0x1ff);
-				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.uint_);
+				assert(e.type.as!BuiltinType.ty == Ty.uint_);
 			}
 			if (auto e = expr("1337ull").as!IntConst) {
 				assert(e.value == 1337);
-				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.ulong_);
+				assert(e.type.as!BuiltinType.ty == Ty.ulong_);
 			}
 		});
 	crtest!("parenthesized constant",
 		() {
 			if (auto e = expr("(42)").as!IntConst) {
 				assert(e.value == 42);
-				assert(e.type.as!BuiltinType.kind == BuiltinType.Kind.int_);
+				assert(e.type.as!BuiltinType.ty == Ty.int_);
 			}
 		});
 }

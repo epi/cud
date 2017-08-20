@@ -112,10 +112,9 @@ class TypeTraitExpr : Expr
 	TypeTrait trait;
 	Type theType;
 
-	this(Location location, TypeTrait trait, Type type)
+	this(Location location, Type result_type, TypeTrait trait, Type type)
 	{
-		//FIXME: don't create new BuiltinType here
-		super(location, new BuiltinType(BuiltinType.Kind.int_), false);
+		super(location, result_type, false);
 		this.trait = trait;
 		this.theType = type;
 	}

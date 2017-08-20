@@ -135,7 +135,7 @@ public:
 
 	override void visit(BuiltinType type)
 	{
-		put(type.kind.to!string[0 .. $ - 1]);
+		put(type.ty.to!string[0 .. $ - 1]);
 	}
 
 	override void visit(QualifiedType type)
@@ -165,7 +165,7 @@ public:
 
 	override void visit(ConstantArrayType type)
 	{
-		put("array[3] ");
+		put("array[", type.numElements, "] ");
 		type.elementType.accept(this);
 	}
 
