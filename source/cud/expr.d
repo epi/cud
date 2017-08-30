@@ -24,6 +24,11 @@ class Expr
 		import cud.visitor : tostr = toString;
 		return tostr(this);
 	}
+
+	@property IntConst isIntConst()
+	{
+		return null;
+	}
 }
 
 class IntConst : Expr
@@ -37,6 +42,11 @@ class IntConst : Expr
 	}
 
 	override void accept(Visitor ev) { ev.visit(this); }
+
+	override @property IntConst isIntConst()
+	{
+		return this;
+	}
 }
 
 class IndexExpr : Expr
@@ -170,4 +180,19 @@ class CondExpr : Expr
 	}
 
 	override void accept(Visitor ev) { ev.visit(this); }
+}
+
+T evaluate(T)(Expr e)
+{
+	import std.traits : isIntegral;
+	static if (isIntegral!T) {
+		if (IntConst ic = e.isIntConst) {
+			return cast(T) ic.value;
+		} else {
+			error(e.location, "Expected constant integer expression");
+			assert(0);
+		}
+	} else {
+		static assert(0);
+	}
 }

@@ -592,8 +592,7 @@ struct Parser {
 					// TODO: if (static_) enforce(inside func proto)
 					if (!peek!`]`) {
 						Expr e = parseAssignExpr();
-						// TODO: evaluate e
-						t = t.constantArray(3);
+						t = t.constantArray(e.evaluate!ulong);
 					} else {
 						t = t.incompleteArray;
 					}
@@ -1659,7 +1658,7 @@ unittest
 					"int"           : "int",
 					"int *"         : "ptr int",
 					"int *[3]"      : "array[3] ptr int",
-					"int (*)[3]"    : "ptr array[3] int",
+					"int (*)[42]"   : "ptr array[42] int",
 					"int (*)[*]"    : "ptr array[*] int",
 				/+	"int *()"       : "func(?:ptr(int))",
 					"int (*)(void)" : "func(:int)",
