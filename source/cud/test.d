@@ -27,8 +27,10 @@ void crtest(string description, alias fun)()
 	}
 
 	scope(failure) {
-		import std.stdio;
-		debug stderr.writeln("Test failed: " ~ description);
+		() @trusted {
+			import std.stdio;
+			debug stderr.writeln("Test failed: ", description);
+		}();
 	}
 	fun();
 }
