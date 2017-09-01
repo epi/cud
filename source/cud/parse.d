@@ -21,7 +21,7 @@ version(unittest) {
 	import cud.test;
 }
 
-class Declaration
+class Decl
 {
 	Location location;
 
@@ -31,25 +31,25 @@ class Declaration
 	}
 }
 
-class EnumConstantDeclaration : Declaration
+class EnumConstDecl : Decl
 {
 	string name;
-	Expr expr;
+	long value;
 
-	this(Location location, string name, Expr expr)
+	this(Location location, string name, long value)
 	{
 		super(location);
 		this.name = name;
-		this.expr = expr;
+		this.value = value;
 	}
 }
 
-class EnumDeclaration : Declaration
+class EnumDecl : Decl
 {
 	string tag;
-	EnumConstantDeclaration[] list;
+	EnumConstDecl[] list;
 
-	this(Location location, string tag, EnumConstantDeclaration[] list)
+	this(Location location, string tag, EnumConstDecl[] list)
 	{
 		super(location);
 		this.tag = tag;
@@ -475,7 +475,7 @@ struct Parser {
 					continue;
 				} else if (auto tok = match!`enum`) {
 					tokens[tok.kind] = tok;
-					result[itype] = parseEnum();
+					result[itype] = m_target.enum_(parseEnum(tok));
 					continue;
 				} else if (auto tok = match!`struct union`) {
 					tokens[tok.kind] = tok;
@@ -498,12 +498,13 @@ struct Parser {
 				} else if (auto tok = match!`_Alignas`) {
 					tokens[tok.kind] = tok;
 					expect!`(`;
-					result[ialign] = peekExpr()
-						? parseConstantExpr()
-						: new TypeTraitExpr(
+					result[ialign] = peekTypeName()
+						? new TypeTraitExpr(
 							tok.location,
+							m_target.size_t_,
 							TypeTrait.alignof_,
-							parseTypeName());
+							parseTypeName())
+						: parseConstantExpr();
 					expect!`)`;
 					continue;
 				}
@@ -526,6 +527,18 @@ struct Parser {
 					result[itype] = result[itype].qualified(result[iqual]);
 			}
 		}
+	}
+
+	version(unittest)
+	Type parseDeclSpecifiers()
+	{
+		Type t;
+		Qualifiers q;
+		StorageClass s;
+		FunctionSpecifiers f;
+		Expr e;
+		parseSpecifiers(t, q, s, f, e);
+		return t;
 	}
 
 	void skipParens()
@@ -627,10 +640,53 @@ struct Parser {
 		return parseAbstractDeclarator(result);
 	}
 
-	Type parseEnum()
+	/*
+	enum-specifier:
+		enum identifieropt { enumerator-list }
+		enum identifieropt { enumerator-list , }
+		enum identifier
+
+	enumerator-list:
+		enumerator
+		enumerator-list , enumerator
+
+	enumerator:
+		enumeration-constant
+		enumeration-constant = constant-expression
+	*/
+	EnumDecl parseEnum(Token enum_tok)
 	{
-		return null;
+		string tag;
+		EnumConstDecl[] list;
+
+		if (auto tok = match!`identifier`)
+			tag = tok.spelling;
+
+		if (tag ? match!`{` : expect!`{`) {
+			long value = -1;
+			while (!match!`}`) {
+				const idtok = expect!`identifier`;
+				if (match!`=`)
+					value = evaluate!long(parseConstantExpr());
+				else
+					value++;
+				list ~= new EnumConstDecl(
+					idtok.location, idtok.spelling, value);
+				if (match!`}`)
+					break;
+				expect!`,`;
+			}
+			if (list.length == 0) {
+				error(enum_tok.location, "empty enum declaration");
+				assert(0);
+			}
+		}
+
+		return new EnumDecl(enum_tok.location, tag, list);
 	}
+
+	version(unittest)
+	auto parseEnum() { return parseEnum(expect!`enum`); }
 
 	Type parseStructOrUnion(TokenKind k)
 	{
@@ -638,77 +694,6 @@ struct Parser {
 	}
 
 	/+
-	// 6.7.2.2
-	EnumDeclaration parseEnumSpecifier(ref const(Token)[] input)
-	{
-		const(Token)[] temp_input = input;
-		immutable decl_location = input.front.location;
-		temp_input.popFront; // enum
-
-		Token tok = temp_input.front;
-		string tag;
-		if (tok.kind == tk!`identifier`) {
-			tag = tok.spelling;
-			temp_input.popFront;
-			tok = temp_input.front;
-		}
-		if (tok.kind != tk!`{`) {
-			if (!tag) {
-				error(tok.location, "found '%s' when expecting identifier or '{' after 'enum'",
-					tok.spelling);
-				assert(0);
-			}
-			input = temp_input;
-			return new EnumDeclaration(decl_location, tag, null);
-		}
-		temp_input.popFront; // lcurly
-
-		EnumConstantDeclaration[] list;
-		for (;;) {
-			const id_tok = temp_input.front;
-			if (id_tok.kind == tk!`}`) {
-				temp_input.popFront;
-				break;
-			}
-			if (id_tok.kind != tk!`identifier`) {
-				error(tok.location, "expected identifier, not '%s'", id_tok.spelling);
-				assert(0);
-			}
-			string name = id_tok.spelling;
-			Expr expr;
-			temp_input.popFront;
-			tok = temp_input.front;
-			if (tok.kind == tk!`=`) {
-				temp_input.popFront;
-				expr = parseConditionalExpr(temp_input);
-				if (!expr) {
-					error(temp_input.front.location,
-						"expected expression, not '%s'",
-						temp_input.front.spelling);
-					assert(0);
-				}
-				// TODO: evaluate expr
-				tok = temp_input.front;
-			}
-			list ~= new EnumConstantDeclaration(id_tok.location, name, expr);
-			if (tok.kind == tk!`}`) {
-				temp_input.popFront;
-				break;
-			}
-			if (tok.kind != tk!`,`) {
-				error(tok.location, "expected ',', not '%s'", tok.spelling);
-				assert(0);
-			}
-			temp_input.popFront;
-		}
-		if (list.length == 0) {
-			error(decl_location, "empty enum declaration");
-			assert(0);
-		}
-		input = temp_input;
-		return new EnumDeclaration(decl_location, tag, list);
-	}
-
 	enum SpecifierSet
 	{
 		declarationSpecifiers,
@@ -716,7 +701,7 @@ struct Parser {
 		typeQualifierList,
 	}
 
-	// 6.7. Declarations
+	// 6.7. Decls
 	// declaration-specifiers <
 	//  ( storage-class-specifier / type-specifier / type-qualifier / function-specifier / alignment-specifier )+
 	//
@@ -1364,12 +1349,11 @@ unittest
 		});
 }
 
-version(none)
 unittest
 {
 	crtest!("enum without enumerator list",
 		() {
-			auto e = parse!"EnumSpecifier"(`enum foo;`, tk!`;`).as!EnumDeclaration;
+			auto e = parse!"Enum"(`enum foo;`, tk!`;`).as!EnumDecl;
 			assert(e.tag == "foo");
 			assert(e.list.length == 0);
 		});
@@ -1377,30 +1361,30 @@ unittest
 	crtest!("enum with one constant with default value",
 		() {
 			foreach (src; [`enum foo { bar };`, `enum foo { bar, };`]) {
-				auto e = parse!"EnumSpecifier"(src, tk!`;`)
-					.as!EnumDeclaration;
+				auto e = parse!"Enum"(src, tk!`;`)
+					.as!EnumDecl;
 				assert(e.tag == "foo");
 				assert(e.list.length == 1);
 				assert(e.list[0].name == "bar");
-				assert(e.list[0].expression is null);
+				assert(e.list[0].value == 0);
 			}
 		});
 
 	crtest!("enum with multiple constants",
 		() {
 			auto e =
-				parse!"EnumSpecifier"(
+				parse!"Enum"(
 					`enum foo { bar, baz = 13, quux = 42, };`,
 					tk!`;`)
-				.as!EnumDeclaration;
+				.as!EnumDecl;
 			assert(e.tag == "foo");
 			assert(e.list.length == 3);
 			assert(e.list[0].name == "bar");
-			assert(e.list[0].expression is null);
+			assert(e.list[0].value == 0);
 			assert(e.list[1].name == "baz");
-			assert(e.list[1].expression.as!IntConst.value == 13);
+			assert(e.list[1].value == 13);
 			assert(e.list[2].name == "quux");
-			assert(e.list[2].expression.as!IntConst.value == 42);
+			assert(e.list[2].value == 42);
 		});
 
 	crtest!("malformed enum spec",
@@ -1418,7 +1402,7 @@ unittest
 					"enum a {b=,}",
 				])
 			{
-				assertThrown(parse!"Specifiers!(Parser.SpecifierSet.declarationSpecifiers)"(src), src);
+				assertThrown(parse!"DeclSpecifiers"(src), src);
 			}
 		});
 }

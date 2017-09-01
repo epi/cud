@@ -108,6 +108,12 @@ class Target
 		return new PointerType(t, pointerSize);
 	}
 
+	import cud.parse : EnumDecl;
+	EnumType enum_(EnumDecl decl)
+	{
+		return new EnumType(decl);
+	}
+
 private:
 	version (D_LP64) {
 		static immutable ulong[Ty.max + 1] typeSizes = [
@@ -335,6 +341,24 @@ class VariableArrayType : ArrayType
 	{
 		super(element_type);
 		this.numElements = num_elements;
+	}
+
+	override void accept(Visitor visitor) { visitor.visit(this); }
+
+	override @property ulong size() const
+	{
+		assert(0); // TODO
+	}
+}
+
+class EnumType : Type
+{
+	import cud.parse : EnumDecl;
+	EnumDecl decl;
+
+	private this(EnumDecl decl)
+	{
+		this.decl = decl;
 	}
 
 	override void accept(Visitor visitor) { visitor.visit(this); }

@@ -18,6 +18,7 @@ abstract class Visitor
 	void visit(IncompleteArrayType) { assert(0); }
 	void visit(ConstantArrayType) { assert(0); }
 	void visit(VariableArrayType) { assert(0); }
+	void visit(EnumType) { assert(0); }
 	// void visit(StructType);
 	// void visit(UnionType);
 	// void visit(FunctionType);
